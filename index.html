@@ -1,0 +1,2513 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Scanner Absensi Kehadiran Ujian & Berita Acara - SMP Negeri 56 Merangin</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Google Fonts: Inter -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <!-- SheetJS (XLSX) CDN untuk Export Rekap Excel -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <!-- jsQR CDN untuk Pemindaian QR Code Android/WebView & Foto -->
+    <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
+    <!-- html2pdf.js CDN untuk Download PDF Berita Acara & Daftar Hadir di HP Android -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f1f5f9;
+            color: #0f172a;
+        }
+
+        /* Jenis huruf Times New Roman khusus dokumen Berita Acara & Daftar Hadir */
+        .doc-times-roman,
+        .doc-times-roman *,
+        #ba-live-preview-container,
+        #ba-live-preview-container * {
+            font-family: "Times New Roman", Times, Georgia, serif !important;
+        }
+
+        /* Pastikan video pemindai live tampil penuh di layar HP */
+        #html5-qr-reader video,
+        #qr-video {
+            width: 100% !important;
+            height: 100% !important;
+            object-fit: cover !important;
+            display: block !important;
+        }
+        #html5-qr-reader img[alt="Info icon"] {
+            display: none !important;
+        }
+
+        /* =========================================================
+           PENGATURAN HALAMAN CETAK RESMI (BERITA ACARA & DAFTAR HADIR)
+           ========================================================= */
+        @media print {
+            @page {
+                size: 210mm 297mm portrait;
+                margin: 12mm;
+            }
+            body {
+                background: #ffffff !important;
+                margin: 0 !important;
+                padding: 0 !important;
+            }
+            .no-print {
+                display: none !important;
+            }
+            body.print-only-ba #print-attendance-sheet {
+                display: none !important;
+            }
+            body.print-only-ba #print-berita-acara-sheet {
+                display: block !important;
+            }
+            body.print-only-attendance #print-berita-acara-sheet {
+                display: none !important;
+            }
+            body.print-only-attendance #print-attendance-sheet {
+                display: block !important;
+            }
+            body.print-both #print-berita-acara-sheet {
+                display: block !important;
+                page-break-after: always;
+                break-after: page;
+            }
+            body.print-both #print-attendance-sheet {
+                display: block !important;
+            }
+            table {
+                width: 100% !important;
+                border-collapse: collapse !important;
+            }
+            th, td {
+                border: 1px solid #334155 !important;
+                padding: 5px 7px !important;
+                font-size: 9.5pt !important;
+            }
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col">
+
+    <!-- Toast Notification Container -->
+    <div id="toast-container" class="fixed top-4 right-4 z-50 flex flex-col gap-2 max-w-sm no-print"></div>
+
+    <!-- Modal Konfirmasi -->
+    <div id="confirm-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 hidden items-center justify-center p-4 no-print">
+        <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 border border-slate-200">
+            <h3 id="confirm-title" class="text-lg font-bold text-slate-800 mb-2">Konfirmasi Tindakan</h3>
+            <p id="confirm-message" class="text-sm text-slate-600 mb-6">Apakah Anda yakin?</p>
+            <div class="flex justify-end gap-3">
+                <button id="confirm-cancel-btn" class="px-4 py-2 rounded-xl text-sm font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 transition">Batal</button>
+                <button id="confirm-ok-btn" class="px-4 py-2 rounded-xl text-sm font-semibold text-white bg-rose-600 hover:bg-rose-700 transition">Ya, Lanjutkan</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL INPUT SISWA TIDAK HADIR -->
+    <div id="absent-student-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 hidden items-center justify-center p-4 no-print">
+        <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 border border-slate-200 max-h-[92vh] overflow-y-auto">
+            <div class="flex items-center justify-between border-b border-slate-100 pb-3 mb-4">
+                <div>
+                    <h3 class="text-base sm:text-lg font-extrabold text-slate-800">Input Siswa Tidak Hadir</h3>
+                    <p class="text-xs text-slate-500">Data otomatis masuk ke Daftar Hadir, Excel, dan Berita Acara Ujian.</p>
+                </div>
+                <button type="button" onclick="closeAbsentStudentModal()" class="text-slate-400 hover:text-slate-700 p-1.5 rounded-lg">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                </button>
+            </div>
+
+            <form id="absent-student-form" onsubmit="submitAbsentStudent(event)" class="space-y-3.5 text-xs">
+                <div id="absent-master-picker-wrap">
+                    <label class="block font-bold text-slate-700 mb-1">Pilih Cepat dari Daftar Siswa Belum Hadir (Opsional)</label>
+                    <select id="abs-select-master" onchange="fillAbsentFormFromMaster()" class="w-full px-3 py-2.5 border border-slate-300 rounded-xl bg-blue-50/60 font-semibold text-slate-800 focus:ring-2 focus:ring-blue-900 outline-none">
+                        <option value="">-- Ketik Manual atau Pilih Siswa --</option>
+                    </select>
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                        <label class="block font-bold text-slate-700 mb-1">Nomor Peserta Ujian *</label>
+                        <input type="text" id="abs-no-peserta" required placeholder="Contoh: US-26-003" class="w-full px-3 py-2.5 border border-slate-300 rounded-xl uppercase font-semibold focus:ring-2 focus:ring-blue-900 outline-none">
+                    </div>
+                    <div>
+                        <label class="block font-bold text-slate-700 mb-1">NISN (Opsional)</label>
+                        <input type="text" id="abs-nisn" placeholder="Contoh: 0012345680" class="w-full px-3 py-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-900 outline-none">
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block font-bold text-slate-700 mb-1">Nama Lengkap Siswa *</label>
+                    <input type="text" id="abs-nama" required placeholder="Contoh: MUHAMMAD RIZKI PRATAMA" class="w-full px-3 py-2.5 border border-slate-300 rounded-xl uppercase font-semibold focus:ring-2 focus:ring-blue-900 outline-none">
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                        <label class="block font-bold text-slate-700 mb-1">Kelas *</label>
+                        <input type="text" id="abs-kelas" required placeholder="Contoh: VIII-B" class="w-full px-3 py-2.5 border border-slate-300 rounded-xl uppercase font-semibold focus:ring-2 focus:ring-blue-900 outline-none">
+                    </div>
+                    <div>
+                        <label class="block font-bold text-slate-700 mb-1">Ruang Ujian *</label>
+                        <input type="text" id="abs-ruang" required placeholder="Contoh: Ruang 01" class="w-full px-3 py-2.5 border border-slate-300 rounded-xl font-semibold focus:ring-2 focus:ring-blue-900 outline-none">
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                        <label class="block font-bold text-slate-700 mb-1">Keterangan Tidak Hadir *</label>
+                        <select id="abs-status" class="w-full px-3 py-2.5 border border-rose-300 rounded-xl bg-rose-50/60 font-bold text-rose-900 focus:ring-2 focus:ring-rose-600 outline-none">
+                            <option value="SAKIT">Sakit (S)</option>
+                            <option value="IZIN">Izin (I)</option>
+                            <option value="ALPA">Tanpa Keterangan / Alpa (A)</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block font-bold text-slate-700 mb-1">Catatan Tambahan (Opsional)</label>
+                        <input type="text" id="abs-catatan" placeholder="Misal: Surat dokter / izin orang tua" class="w-full px-3 py-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-900 outline-none">
+                    </div>
+                </div>
+
+                <div class="flex justify-end gap-2.5 pt-3 border-t border-slate-100">
+                    <button type="button" onclick="closeAbsentStudentModal()" class="px-4 py-2.5 rounded-xl font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 transition">Batal</button>
+                    <button type="submit" class="px-5 py-2.5 rounded-xl font-extrabold text-white bg-rose-600 hover:bg-rose-700 transition shadow-sm">
+                        Simpan Siswa Tidak Hadir
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- MODAL BERITA ACARA PELAKSANAAN UJIAN BERBASIS HP ANDROID + LIVE PRATINJAU -->
+    <div id="berita-acara-modal" class="fixed inset-0 bg-slate-900/70 backdrop-blur-xs z-50 hidden items-center justify-center p-2 sm:p-4 no-print">
+        <div class="bg-white rounded-2xl shadow-2xl max-w-6xl w-full border border-slate-200 max-h-[95vh] flex flex-col overflow-hidden">
+            <!-- Header Modal -->
+            <div class="px-4 sm:px-6 py-3.5 bg-[#123466] text-white flex flex-wrap items-center justify-between gap-2 shrink-0">
+                <div>
+                    <h3 class="text-sm sm:text-base font-extrabold">Berita Acara Pelaksanaan Ujian (Berbasis HP Android)</h3>
+                    <p class="text-[11px] text-blue-200">Lengkapi rincian di kiri lalu klik tombol <strong>Generate Berita Acara</strong> untuk memperbarui pratinjau &amp; unduhan PDF.</p>
+                </div>
+                <div class="flex items-center gap-2">
+                    <button type="button" onclick="refreshBeritaAcaraData()" class="px-3 py-1.5 rounded-xl text-xs font-bold bg-white/15 hover:bg-white/25 text-white border border-white/25 transition flex items-center gap-1.5">
+                        <span>🔄 Refresh Data</span>
+                    </button>
+                    <button type="button" onclick="closeBeritaAcaraModal()" class="text-white/80 hover:text-white p-1.5 rounded-lg">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Isi Modal 2 Kolom: Form Input (Kiri) + Live Pratinjau Dokumen (Kanan) -->
+            <div class="flex-1 overflow-y-auto grid grid-cols-1 lg:grid-cols-12">
+                <!-- KOLOM KIRI: INPUT RINCIAN BERITA ACARA -->
+                <div class="lg:col-span-5 p-4 sm:p-5 border-b lg:border-b-0 lg:border-r border-slate-200 bg-slate-50 space-y-3 text-xs overflow-y-auto">
+                    <div class="bg-blue-50 border border-blue-200 rounded-xl p-3 text-blue-950">
+                        <div class="flex items-center justify-between gap-2 mb-1">
+                            <span class="font-extrabold text-[11px] uppercase tracking-wide text-blue-800">Data Otomatis dari Absensi Kehadiran</span>
+                            <button type="button" onclick="closeBeritaAcaraModal()" class="text-[11px] font-bold text-blue-700 underline hover:text-blue-900">Ubah di Panel Utama</button>
+                        </div>
+                        <div class="grid grid-cols-1 gap-1 text-[11px] mt-1.5">
+                            <div><span class="text-slate-500">Ruang Ujian:</span> <strong id="ba-auto-ruang-badge">-</strong></div>
+                            <div><span class="text-slate-500">Pengawas Ruang:</span> <strong id="ba-auto-pengawas-badge">-</strong></div>
+                            <div><span class="text-slate-500">NIP Pengawas:</span> <strong id="ba-auto-nip-badge">-</strong></div>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                        <div>
+                            <label class="block font-bold text-slate-700 mb-1">Moda Ujian Android</label>
+                            <select id="ba-moda-ujian" onchange="saveBeritaAcaraMeta()" class="w-full px-3 py-2 border border-slate-300 rounded-xl bg-white focus:ring-2 focus:ring-blue-900 outline-none font-medium">
+                                <option value="Daring / Online via HP Android (Paperless)">Daring / Online via HP Android</option>
+                                <option value="Semi-Online / Server Lokal Sekolah via HP Android">Semi-Online / Server Lokal via HP</option>
+                                <option value="CBT ExamBrowser Android (Terkunci)">CBT ExamBrowser Android</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block font-bold text-slate-700 mb-1">Aplikasi / Platform Ujian</label>
+                            <input type="text" id="ba-aplikasi-ujian" value="ExamBrowser / Google Form / CBT Sekolah" oninput="saveBeritaAcaraMeta()" class="w-full px-3 py-2 border border-slate-300 rounded-xl bg-white focus:ring-2 focus:ring-blue-900 outline-none">
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-3 gap-2">
+                        <div>
+                            <label class="block font-bold text-slate-700 mb-1">Seharusnya</label>
+                            <input type="number" min="0" id="ba-total-seharusnya" oninput="saveBeritaAcaraMeta(true)" class="w-full px-2.5 py-2 border border-slate-300 rounded-xl bg-white font-bold text-center focus:ring-2 focus:ring-blue-900 outline-none">
+                        </div>
+                        <div>
+                            <label class="block font-bold text-emerald-700 mb-1">Hadir (Scan)</label>
+                            <input type="number" min="0" id="ba-total-hadir" oninput="saveBeritaAcaraMeta(true)" class="w-full px-2.5 py-2 border border-emerald-300 rounded-xl bg-emerald-50/50 font-bold text-emerald-900 text-center focus:ring-2 focus:ring-emerald-600 outline-none">
+                        </div>
+                        <div>
+                            <label class="block font-bold text-rose-700 mb-1">Tidak Hadir</label>
+                            <input type="number" min="0" id="ba-total-tidak-hadir" readonly class="w-full px-2.5 py-2 border border-rose-200 rounded-xl bg-rose-50 font-bold text-rose-900 text-center">
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="block font-bold text-slate-700 mb-1">Nomor Peserta Tidak Hadir</label>
+                        <input type="text" id="ba-no-tidak-hadir" placeholder="Nihil" oninput="saveBeritaAcaraMeta()" class="w-full px-3 py-2 border border-slate-300 rounded-xl bg-white focus:ring-2 focus:ring-blue-900 outline-none">
+                    </div>
+
+                    <div>
+                        <label class="block font-bold text-slate-700 mb-1">Status Koneksi Internet / Server &amp; Aplikasi</label>
+                        <select id="ba-status-jaringan" onchange="saveBeritaAcaraMeta()" class="w-full px-3 py-2 border border-slate-300 rounded-xl bg-white focus:ring-2 focus:ring-blue-900 outline-none">
+                            <option value="Lancar dan stabil dari awal hingga akhir sesi ujian">Lancar &amp; stabil sepanjang ujian</option>
+                            <option value="Sempat terjadi kendala jaringan sebentar, namun dapat teratasi">Sempat kendala jaringan, dapat teratasi</option>
+                            <option value="Menggunakan tethering / jaringan cadangan sekolah">Menggunakan jaringan cadangan sekolah</option>
+                        </select>
+                    </div>
+
+                    <div>
+                        <label class="block font-bold text-slate-700 mb-1">Catatan Kejadian Khusus Selama Ujian</label>
+                        <textarea id="ba-catatan" rows="2" oninput="saveBeritaAcaraMeta()" class="w-full px-3 py-2 border border-slate-300 rounded-xl bg-white focus:ring-2 focus:ring-blue-900 outline-none">Pelaksanaan ujian menggunakan perangkat HP Android berjalan tertib, lancar, dan kondusif.</textarea>
+                    </div>
+
+                    <div class="pt-2 border-t border-slate-200">
+                        <div class="text-[11px] font-bold text-slate-500 mb-2">Pengawas Ruang II (Opsional — isi jika ruangan diawasi 2 orang)</div>
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                            <div>
+                                <label class="block font-semibold text-slate-600 mb-1">Nama Pengawas Ruang 2</label>
+                                <input type="text" id="ba-pengawas-2" placeholder="Kosongkan jika 1 pengawas" oninput="saveBeritaAcaraMeta()" class="w-full px-3 py-2 border border-slate-300 rounded-xl bg-white focus:ring-2 focus:ring-blue-900 outline-none">
+                            </div>
+                            <div>
+                                <label class="block font-semibold text-slate-600 mb-1">NIP Pengawas Ruang 2</label>
+                                <input type="text" id="ba-nip-2" placeholder="-" oninput="saveBeritaAcaraMeta()" class="w-full px-3 py-2 border border-slate-300 rounded-xl bg-white focus:ring-2 focus:ring-blue-900 outline-none">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Tombol Generate Berita Acara -->
+                    <div class="pt-2">
+                        <button type="button" onclick="generateBeritaAcaraPreview()" class="w-full py-2.5 px-4 rounded-xl text-xs font-extrabold bg-indigo-600 hover:bg-indigo-700 text-white transition shadow-md flex items-center justify-center gap-2">
+                            <span>⚡ Generate Berita Acara</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- KOLOM KANAN: LIVE PRATINJAU SURAT BERITA ACARA -->
+                <div class="lg:col-span-7 p-4 sm:p-6 bg-slate-200/80 overflow-y-auto">
+                    <div class="text-[11px] font-bold text-slate-600 uppercase tracking-wider mb-2 flex items-center justify-between">
+                        <span>Pratinjau Dokumen Resmi Berita Acara (A4 Portrait)</span>
+                        <span id="ba-preview-status-badge" class="text-emerald-700 font-semibold">● Tersinkron Otomatis</span>
+                    </div>
+                    <div id="ba-live-preview-container" class="bg-white shadow-lg border border-slate-300 rounded-lg p-6 sm:p-8 mx-auto max-w-[210mm]" style="font-family: 'Times New Roman', Times, Georgia, serif;">
+                        <!-- Isi pratinjau surat diinjeksi langsung dari #print-berita-acara-sheet -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Footer Aksi Modal: Efisien dengan Tombol Tutup & Download PDF -->
+            <div class="px-4 sm:px-6 py-3 bg-slate-100 border-t border-slate-200 flex flex-wrap items-center justify-between gap-2 shrink-0">
+                <button type="button" onclick="closeBeritaAcaraModal()" class="px-4 py-2 rounded-xl text-xs font-semibold text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 transition">
+                    Tutup
+                </button>
+                <div class="flex flex-wrap items-center gap-2">
+                    <button type="button" onclick="downloadBeritaAcaraPDF(false)" class="px-4 py-2 rounded-xl text-xs font-extrabold text-white bg-emerald-600 hover:bg-emerald-700 transition shadow-xs">
+                        ⬇️ Download PDF Berita Acara
+                    </button>
+                    <button type="button" onclick="downloadBeritaAcaraPDF(true)" class="px-4 py-2 rounded-xl text-xs font-extrabold text-white bg-teal-700 hover:bg-teal-800 transition shadow-xs">
+                        ⬇️ Download PDF Berita Acara + Absen
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- NAVBAR HEADER APLIKASI -->
+    <header class="bg-[#123466] text-white shadow-md sticky top-0 z-30 no-print">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 py-3.5 flex flex-wrap items-center justify-between gap-3">
+            <div class="flex items-center gap-3">
+                <!-- Logo Perisai SMP Negeri 56 Merangin -->
+                <div class="w-11 h-12 shrink-0 flex items-center justify-center">
+                    <svg viewBox="0 0 120 132" fill="none" xmlns="http://www.w3.org/2000/svg" class="w-full h-full drop-shadow-sm">
+                        <defs>
+                            <clipPath id="smp56-header-shield">
+                                <path d="M18 12 Q39 24 60 8 Q81 24 102 12 C116 42 110 96 60 124 C10 96 4 42 18 12 Z"/>
+                            </clipPath>
+                        </defs>
+                        <path d="M18 12 Q39 24 60 8 Q81 24 102 12 C116 42 110 96 60 124 C10 96 4 42 18 12 Z"
+                              fill="#ffffff" stroke="#ffffff" stroke-width="5" stroke-linejoin="round"/>
+                        <g clip-path="url(#smp56-header-shield)">
+                            <rect x="0" y="0" width="120" height="58" fill="#0066cc"/>
+                            <rect x="0" y="58" width="120" height="17" fill="#ffffff"/>
+                            <rect x="0" y="75" width="120" height="57" fill="#ffffff"/>
+                            <line x1="0" y1="58" x2="120" y2="58" stroke="#111827" stroke-width="2.5"/>
+                            <line x1="0" y1="75" x2="120" y2="75" stroke="#111827" stroke-width="2.5"/>
+                            <text x="60" y="34" text-anchor="middle" fill="#ffffff" font-family="Georgia, 'Times New Roman', serif" font-weight="bold" font-size="14.5" letter-spacing="0.5">SMP</text>
+                            <text x="60" y="51" text-anchor="middle" fill="#ffffff" font-family="Georgia, 'Times New Roman', serif" font-weight="bold" font-size="13.5" letter-spacing="0.3">MERANGIN</text>
+                            <text x="60" y="70.5" text-anchor="middle" fill="#111827" font-family="Georgia, 'Times New Roman', serif" font-weight="bold" font-size="9.5" letter-spacing="0.3">26 MARET 2012</text>
+                            <text x="60" y="110" text-anchor="middle" fill="#0066cc" font-family="Georgia, 'Times New Roman', serif" font-weight="bold" font-size="36" letter-spacing="-0.5">56</text>
+                        </g>
+                        <path d="M18 12 Q39 24 60 8 Q81 24 102 12 C116 42 110 96 60 124 C10 96 4 42 18 12 Z"
+                              stroke="#111827" stroke-width="2.8" stroke-linejoin="round"/>
+                    </svg>
+                </div>
+                <div>
+                    <h1 class="text-sm sm:text-base lg:text-lg font-extrabold tracking-tight leading-tight">Administrasi Berita Acara dan Absensi Kehadiran Ujian Semester</h1>
+                    <p class="text-xs text-blue-200">Pengawas Ruang Ujian • SMP Negeri 56 Merangin</p>
+                </div>
+            </div>
+
+            <!-- Penunjuk Waktu Jam Digital Live -->
+            <div class="bg-white/10 border border-white/20 rounded-xl px-3.5 py-1.5 text-right shrink-0">
+                <div id="live-digital-clock" class="font-mono text-sm sm:text-base font-extrabold tracking-wider text-amber-300 leading-tight">00:00:00 WIB</div>
+                <div id="live-digital-date" class="text-[10px] text-blue-100 font-medium leading-tight">-</div>
+            </div>
+
+            <div class="flex flex-wrap items-center gap-2">
+                <button type="button" onclick="openBeritaAcaraModal()" class="px-3.5 py-2 rounded-xl text-xs font-extrabold bg-indigo-500 hover:bg-indigo-400 text-white transition flex items-center gap-1.5 shadow-xs">
+                    <span>📋 Berita Acara Ujian</span>
+                </button>
+                <button type="button" onclick="downloadBeritaAcaraPDF(false)" class="px-3 py-2 rounded-xl text-xs font-bold bg-indigo-900/70 hover:bg-indigo-800 text-white border border-indigo-300/40 transition flex items-center gap-1.5 shadow-xs">
+                    <span>⬇️ PDF Berita Acara</span>
+                </button>
+                <button type="button" onclick="exportAttendanceExcel()" class="px-3 py-2 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white transition flex items-center gap-1.5 shadow-xs">
+                    <span>📊 Rekap Excel</span>
+                </button>
+                <button type="button" onclick="downloadDaftarHadirPDF()" class="px-3 py-2 rounded-xl text-xs font-bold bg-amber-400 hover:bg-amber-300 text-slate-950 transition flex items-center gap-1.5 shadow-xs">
+                    <span>⬇️ PDF Daftar Hadir</span>
+                </button>
+                <button type="button" onclick="printBeritaAcara(true)" class="px-3.5 py-2 rounded-xl text-xs font-extrabold bg-white text-[#123466] hover:bg-blue-50 transition flex items-center gap-1.5 shadow-sm">
+                    <span>🖨️ Cetak Berita Acara &amp; Daftar Hadir</span>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- KONTEN UTAMA APLIKASI -->
+    <main class="max-w-7xl w-full mx-auto px-4 sm:px-6 py-6 flex-1 grid grid-cols-1 lg:grid-cols-12 gap-6 no-print">
+
+        <!-- KOLOM KIRI: PENGATURAN SESI, NIP & KAMERA SCANNER QR (5 KOLOM) -->
+        <section class="lg:col-span-5 space-y-5">
+
+            <!-- Panel Informasi Pelaksanaan & NIP Pengawas -->
+            <div class="bg-white rounded-2xl shadow-xs border border-slate-200 p-5">
+                <div class="flex items-center justify-between mb-3">
+                    <h2 class="text-sm font-bold text-slate-800 flex items-center gap-2">
+                        <span class="w-2.5 h-2.5 rounded-full bg-[#123466]"></span>
+                        Informasi Pelaksanaan &amp; Pengawas Ruang
+                    </h2>
+                    <span class="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-blue-50 text-blue-900">Tersimpan Otomatis</span>
+                </div>
+
+                <div class="space-y-3 text-xs">
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                        <div>
+                            <label class="block font-semibold text-slate-600 mb-1">Mata Pelajaran Ujian *</label>
+                            <select id="ses-mapel" onchange="handleMapelSelectChange()" class="w-full px-3 py-2 border border-slate-300 rounded-xl bg-white focus:ring-2 focus:ring-blue-900 outline-none font-semibold">
+                                <option value="Pendidikan Agama dan Budi Pekerti">Pendidikan Agama dan Budi Pekerti</option>
+                                <option value="Pendidikan Pancasila">Pendidikan Pancasila</option>
+                                <option value="Bahasa Indonesia" selected>Bahasa Indonesia</option>
+                                <option value="Matematika">Matematika</option>
+                                <option value="Ilmu Pengetahuan Alam (IPA)">Ilmu Pengetahuan Alam (IPA)</option>
+                                <option value="Ilmu Pengetahuan Sosial (IPS)">Ilmu Pengetahuan Sosial (IPS)</option>
+                                <option value="Bahasa Inggris">Bahasa Inggris</option>
+                                <option value="Pendidikan Jasmani, Olahraga, dan Kesehatan (PJOK)">Pendidikan Jasmani, Olahraga, dan Kesehatan (PJOK)</option>
+                                <option value="Informatika">Informatika</option>
+                                <option value="Prakarya">Prakarya</option>
+                                <option value="Koding &amp; Kecerdasan Artificial (KKA)">Koding &amp; Kecerdasan Artificial (KKA)</option>
+                                <option value="Bahasa Arab">Bahasa Arab</option>
+                                <option value="__CUSTOM__">Lainnya (Ketik Manual)...</option>
+                            </select>
+                            <input type="text" id="ses-mapel-custom" oninput="saveSessionMeta()" placeholder="Ketik nama mata pelajaran..." class="hidden mt-1.5 w-full px-3 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-900 outline-none font-semibold">
+                        </div>
+                        <div>
+                            <label class="block font-semibold text-slate-600 mb-1">Tanggal Pelaksanaan *</label>
+                            <input type="date" id="ses-tanggal" oninput="saveSessionMeta()" class="w-full px-3 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-900 outline-none font-semibold">
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                        <div>
+                            <label class="block font-semibold text-slate-600 mb-1">Waktu Pelaksanaan *</label>
+                            <input type="text" id="ses-waktu" list="waktu-suggestions" value="07.30 - 09.30 WIB" oninput="saveSessionMeta()" placeholder="Contoh: 07.30 - 09.30 WIB" class="w-full px-3 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-900 outline-none font-semibold">
+                            <datalist id="waktu-suggestions">
+                                <option value="07.30 - 09.30 WIB"></option>
+                                <option value="10.00 - 12.00 WIB"></option>
+                                <option value="13.00 - 15.00 WIB"></option>
+                            </datalist>
+                        </div>
+                        <div>
+                            <label class="block font-semibold text-slate-600 mb-1">Ruang Ujian / Tugas *</label>
+                            <input type="text" id="ses-ruang" list="ruang-suggestions" value="Ruang 01" oninput="saveSessionMeta()" placeholder="Contoh: Ruang 01" class="w-full px-3 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-900 outline-none font-semibold">
+                            <datalist id="ruang-suggestions">
+                                <option value="Ruang 01"></option>
+                                <option value="Ruang 02"></option>
+                                <option value="Ruang 03"></option>
+                                <option value="Ruang 04"></option>
+                                <option value="Ruang 05"></option>
+                            </datalist>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                        <div>
+                            <label class="block font-semibold text-slate-600 mb-1">Nama Pengawas Ruang *</label>
+                            <input type="text" id="ses-pengawas" value="Guru Pengawas Ruang" oninput="saveSessionMeta()" placeholder="Nama lengkap &amp; gelar" class="w-full px-3 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-900 outline-none font-semibold">
+                        </div>
+                        <div>
+                            <label class="block font-semibold text-slate-600 mb-1">NIP Pengawas Ruang</label>
+                            <input type="text" id="ses-nip" value="" oninput="saveSessionMeta()" placeholder="Contoh: 19850412 201001 1 012" class="w-full px-3 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-900 outline-none font-semibold">
+                        </div>
+                    </div>
+
+                    <!-- Input Jumlah Siswa dalam Satu Ruangan -->
+                    <div class="bg-blue-50/70 border border-blue-200 rounded-xl p-2.5">
+                        <div class="flex items-center justify-between gap-2">
+                            <div class="min-w-0">
+                                <label for="ses-jumlah-siswa" class="block font-bold text-blue-950 text-[11px]">Jumlah Siswa dalam 1 Ruangan *</label>
+                                <p class="text-[10px] text-slate-600 leading-tight mt-0.5">Otomatis tampil di <strong>Total Terdaftar</strong>, menghitung siswa hadir &amp; tidak hadir.</p>
+                            </div>
+                            <input type="number" min="0" id="ses-jumlah-siswa" value="" oninput="saveSessionMeta()" placeholder="0" class="w-24 shrink-0 px-3 py-2 border border-blue-300 rounded-xl bg-white focus:ring-2 focus:ring-blue-900 outline-none font-extrabold text-center text-sm text-[#123466]">
+                        </div>
+                    </div>
+
+                    <!-- Menu Upload Logo Kop Surat (Kiri & Kanan) -->
+                    <div class="pt-2.5 mt-1 border-t border-slate-100 space-y-2">
+                        <div class="flex items-center justify-between">
+                            <span class="font-bold text-slate-700 text-[11px]">Logo Kop Surat Berita Acara &amp; Daftar Hadir</span>
+                            <button type="button" onclick="resetKopLogos()" class="text-[11px] font-semibold text-rose-600 hover:underline">Reset Default</button>
+                        </div>
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            <div>
+                                <div class="text-[10px] font-semibold text-slate-500 mb-1">Logo Kiri (Kabupaten)</div>
+                                <label class="cursor-pointer px-3 py-2 rounded-xl text-[11px] font-bold bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300 transition flex items-center justify-center gap-1.5">
+                                    <span>🖼️ Upload Logo Kiri (Kabupaten)</span>
+                                    <input type="file" id="kop-logo-left-input" accept="image/*" class="hidden" onchange="handleKopLogoUpload('left', event)">
+                                </label>
+                            </div>
+                            <div>
+                                <div class="text-[10px] font-semibold text-slate-500 mb-1">Logo Kanan (Sekolah)</div>
+                                <label class="cursor-pointer px-3 py-2 rounded-xl text-[11px] font-bold bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300 transition flex items-center justify-center gap-1.5">
+                                    <span>🖼️ Upload Logo Kanan (Sekolah)</span>
+                                    <input type="file" id="kop-logo-right-input" accept="image/*" class="hidden" onchange="handleKopLogoUpload('right', event)">
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Panel Kamera Pemindai QR Code (Kompatibel Browser & APK Android) -->
+            <div class="bg-white rounded-2xl shadow-xs border border-slate-200 p-5">
+                <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+                    <h2 class="text-sm font-bold text-slate-800 flex items-center gap-2">
+                        <span id="cam-indicator" class="w-2.5 h-2.5 rounded-full bg-slate-300"></span>
+                        Kamera Pemindai QR Kartu Ujian
+                    </h2>
+                    <div class="flex items-center gap-1.5">
+                        <button type="button" id="btn-start-cam" onclick="startCameraScanner()" class="px-3.5 py-2 rounded-xl text-xs font-extrabold bg-[#123466] hover:bg-blue-950 text-white transition shadow-xs">
+                            📷 Aktifkan Kamera
+                        </button>
+                        <button type="button" id="btn-stop-cam" onclick="stopCameraScanner()" class="hidden px-3 py-2 rounded-xl text-xs font-bold bg-rose-600 hover:bg-rose-700 text-white transition">
+                            ⏹️ Matikan
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Pilihan Lensa Kamera & Foto Kartu Darurat (APK Android) -->
+                <div class="flex flex-wrap items-center gap-2 mb-3 text-xs">
+                    <select id="camera-select" onchange="switchCameraDevice()" class="flex-1 min-w-[160px] px-3 py-2 border border-slate-300 rounded-xl bg-slate-50 font-medium text-slate-700 outline-none">
+                        <option value="environment">Kamera Belakang (Utama)</option>
+                        <option value="user">Kamera Depan (Selfie)</option>
+                    </select>
+                    <label title="Gunakan hanya jika kamera live tidak bisa dibuka atau QR sulit terbaca" class="cursor-pointer px-3 py-2 rounded-xl font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 transition flex items-center gap-1.5 shrink-0">
+                        <span>📸 Foto QR (Cadangan)</span>
+                        <input type="file" id="qr-photo-input" accept="image/*" capture="environment" class="hidden" onchange="handleQrPhotoCapture(event)">
+                    </label>
+                </div>
+
+                <!-- Area Video Kamera Live -->
+                <div class="relative w-full aspect-[4/3] bg-slate-900 rounded-2xl overflow-hidden border-2 border-slate-200 flex items-center justify-center">
+                    <video id="qr-video" playsinline webkit-playsinline muted autoplay class="w-full h-full object-cover hidden"></video>
+                    <canvas id="qr-hidden-canvas" class="hidden"></canvas>
+
+                    <!-- Bingkai Target QR -->
+                    <div id="qr-target-overlay" class="hidden absolute inset-0 pointer-events-none flex items-center justify-center">
+                        <div class="w-48 h-48 sm:w-56 sm:h-56 border-2 border-emerald-400 rounded-2xl shadow-[0_0_0_9999px_rgba(15,23,42,0.45)] relative">
+                            <div class="absolute top-0 left-0 w-5 h-5 border-t-4 border-l-4 border-emerald-400 rounded-tl-lg"></div>
+                            <div class="absolute top-0 right-0 w-5 h-5 border-t-4 border-r-4 border-emerald-400 rounded-tr-lg"></div>
+                            <div class="absolute bottom-0 left-0 w-5 h-5 border-b-4 border-l-4 border-emerald-400 rounded-bl-lg"></div>
+                            <div class="absolute bottom-0 right-0 w-5 h-5 border-b-4 border-r-4 border-emerald-400 rounded-br-lg"></div>
+                        </div>
+                    </div>
+
+                    <!-- Placeholder Saat Kamera Belum Aktif / Pesan Error -->
+                    <div id="cam-placeholder" class="text-center p-5 text-slate-300">
+                        <div class="w-12 h-12 mx-auto mb-2 rounded-2xl bg-white/10 flex items-center justify-center text-2xl">📷</div>
+                        <p id="cam-status-title" class="text-xs font-bold text-white">Kamera Pemindai Live Belum Aktif</p>
+                        <p id="cam-status-desc" class="text-[11px] text-slate-300 mt-1 leading-relaxed">
+                            Klik <strong>Aktifkan Kamera</strong> lalu arahkan langsung ke QR Code kartu peserta untuk memindai otomatis tanpa perlu memotret.
+                        </p>
+                        <label id="btn-fallback-photo-wrap" class="hidden mt-3 inline-flex cursor-pointer px-3.5 py-2 rounded-xl text-xs font-extrabold bg-amber-400 hover:bg-amber-300 text-slate-950 transition items-center gap-1.5 shadow-xs">
+                            <span>📸 Ambil Foto QR (Cadangan)</span>
+                            <input type="file" accept="image/*" capture="environment" class="hidden" onchange="handleQrPhotoCapture(event)">
+                        </label>
+                    </div>
+                </div>
+
+                <!-- Input Cadangan Barcode Scanner USB / Ketik Manual -->
+                <div class="mt-3 pt-3 border-t border-slate-100">
+                    <label class="block text-[11px] font-bold text-slate-600 mb-1">Input Manual / Barcode Scanner USB (Tekan Enter)</label>
+                    <form onsubmit="handleManualBarcodeSubmit(event)" class="flex gap-2">
+                        <input type="text" id="manual-qr-input" placeholder="Scan USB atau ketik No. Peserta / NISN..." class="flex-1 px-3 py-2 text-xs border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-900 outline-none">
+                        <button type="submit" class="px-3.5 py-2 rounded-xl text-xs font-bold bg-slate-800 hover:bg-slate-900 text-white transition">Catat</button>
+                    </form>
+                </div>
+
+                <!-- Tombol Aksi Tambahan di Bawah Scan QR -->
+                <div class="mt-3 pt-3 border-t border-slate-100 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <button type="button" onclick="openAbsentStudentModal()" class="py-2.5 px-3 rounded-xl text-xs font-extrabold bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 transition flex items-center justify-center gap-1.5">
+                        <span>+ Input Tidak Hadir</span>
+                    </button>
+                    <label class="cursor-pointer py-2.5 px-3 rounded-xl text-xs font-bold bg-blue-50 hover:bg-blue-100 text-blue-900 border border-blue-200 transition flex items-center justify-center gap-1.5">
+                        <span>📂 Muat Master Siswa (.xlsx)</span>
+                        <input type="file" accept=".xlsx,.xls,.csv" class="hidden" onchange="handleMasterStudentsUpload(event)">
+                    </label>
+                </div>
+            </div>
+
+            <!-- Kartu Status Hasil Scan Terakhir -->
+            <div id="last-scan-card" class="bg-white rounded-2xl shadow-xs border border-slate-200 p-4">
+                <div class="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1">Status Pemindaian Terakhir</div>
+                <div id="last-scan-body" class="text-xs text-slate-500">Belum ada kartu peserta ujian yang dipindai pada sesi ini.</div>
+            </div>
+
+        </section>
+
+        <!-- KOLOM KANAN: STATISTIK KEHADIRAN & TABEL DAFTAR HADIR (7 KOLOM) -->
+        <section class="lg:col-span-7 space-y-5">
+
+            <!-- Ringkasan Statistik Kehadiran -->
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div class="bg-white rounded-2xl p-4 border border-slate-200 shadow-xs">
+                    <div class="text-[11px] font-semibold text-slate-500">Total Terdaftar</div>
+                    <div id="stat-total" class="text-2xl font-extrabold text-slate-800 mt-1">0</div>
+                </div>
+                <div class="bg-white rounded-2xl p-4 border border-emerald-200 shadow-xs">
+                    <div class="text-[11px] font-semibold text-emerald-700">Total Hadir</div>
+                    <div id="stat-hadir" class="text-2xl font-extrabold text-emerald-600 mt-1">0</div>
+                </div>
+                <div class="bg-white rounded-2xl p-4 border border-amber-200 shadow-xs">
+                    <div class="text-[11px] font-semibold text-amber-700">Belum / Tidak Hadir</div>
+                    <div id="stat-belum" class="text-2xl font-extrabold text-amber-600 mt-1">0</div>
+                </div>
+                <div class="bg-white rounded-2xl p-4 border border-blue-200 shadow-xs">
+                    <div class="text-[11px] font-semibold text-blue-800">Persentase Hadir</div>
+                    <div id="stat-persen" class="text-2xl font-extrabold text-[#123466] mt-1">0%</div>
+                </div>
+            </div>
+
+            <!-- Panel Daftar Kehadiran Peserta -->
+            <div class="bg-white rounded-2xl shadow-xs border border-slate-200 p-5">
+                <div class="flex flex-wrap items-center justify-between gap-3 pb-3 mb-4 border-b border-slate-100">
+                    <div>
+                        <h2 class="text-base font-bold text-slate-800">Daftar Kehadiran &amp; Keterangan Peserta Ujian</h2>
+                        <p class="text-xs text-slate-500">Otomatis terhubung ke Berita Acara Ujian, Cetak A4, dan Rekap Excel.</p>
+                    </div>
+                    <div class="flex flex-wrap items-center gap-2">
+                        <button type="button" onclick="refreshAllAppData()" class="px-3 py-1.5 rounded-xl text-xs font-bold bg-cyan-50 hover:bg-cyan-100 text-cyan-900 border border-cyan-200 transition">
+                            🔄 Refresh Data
+                        </button>
+                        <button type="button" onclick="openBeritaAcaraModal()" class="px-3 py-1.5 rounded-xl text-xs font-bold bg-indigo-50 hover:bg-indigo-100 text-indigo-900 border border-indigo-200 transition">
+                            📋 Berita Acara
+                        </button>
+                        <button type="button" onclick="confirmResetAttendance()" class="px-3 py-1.5 rounded-xl text-xs font-bold bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 transition">
+                            🗑️ Reset Data &amp; Sesi
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Filter Pencarian Daftar Hadir -->
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-2.5 mb-4 text-xs">
+                    <input type="text" id="filter-att-search" oninput="renderAttendanceTable()" placeholder="Cari nama, no. peserta, atau NISN..." class="sm:col-span-2 px-3 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-900 outline-none">
+                    <select id="filter-att-status" onchange="renderAttendanceTable()" class="px-3 py-2 border border-slate-300 rounded-xl bg-white font-semibold text-slate-700 outline-none">
+                        <option value="ALL">Semua Status</option>
+                        <option value="HADIR">Hadir Saja</option>
+                        <option value="ABSENT">Tidak Hadir (S/I/A)</option>
+                    </select>
+                </div>
+
+                <!-- Tabel Daftar Kehadiran -->
+                <div class="overflow-x-auto border border-slate-200 rounded-xl">
+                    <table class="w-full text-left text-xs border-collapse">
+                        <thead class="bg-[#123466] text-white">
+                            <tr>
+                                <th class="p-2.5 font-bold w-10 text-center">No</th>
+                                <th class="p-2.5 font-bold">Waktu / Ket.</th>
+                                <th class="p-2.5 font-bold">No. Peserta</th>
+                                <th class="p-2.5 font-bold">Nama Peserta</th>
+                                <th class="p-2.5 font-bold">Kelas</th>
+                                <th class="p-2.5 font-bold">Ruang</th>
+                                <th class="p-2.5 font-bold text-center">Status</th>
+                                <th class="p-2.5 font-bold text-center w-14">Aksi</th>
+                            </tr>
+                        </thead>
+                        <tbody id="attendance-table-body" class="divide-y divide-slate-200 bg-white">
+                            <!-- Baris dirender oleh JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+        </section>
+    </main>
+
+    <!-- =========================================================
+         TEMPLATE CETAK & PDF 1: BERITA ACARA PELAKSANAAN UJIAN
+         ========================================================= -->
+    <section id="print-berita-acara-sheet" class="doc-times-roman hidden max-w-4xl mx-auto p-6 bg-white text-slate-950" style="font-family: 'Times New Roman', Times, Georgia, serif;">
+        <!-- Kop Surat Resmi Persis Format SMP Negeri 56 Merangin -->
+        <div class="border-b-[3.5px] border-black pb-1 mb-4" style="font-family: 'Times New Roman', Times, Georgia, serif;">
+            <div class="flex items-center justify-between gap-3 px-1">
+                <!-- Logo Sebelah Kiri: Lambang Kabupaten Merangin -->
+                <div id="ba-kop-logo-left" class="w-[74px] h-[82px] shrink-0 flex items-center justify-center">
+                    <svg viewBox="0 0 120 136" preserveAspectRatio="xMidYMid meet" fill="none" xmlns="http://www.w3.org/2000/svg" class="w-full h-full">
+                        <path d="M16 16 Q38 24 60 11 Q82 24 104 16 L104 86 C104 108 82 120 60 129 C38 120 16 108 16 86 Z"
+                              fill="#7aa8d6" stroke="#dc2626" stroke-width="3.2" stroke-linejoin="round"/>
+                        <text x="60" y="27" text-anchor="middle" fill="#111827" font-family="'Times New Roman', Times, Georgia, serif" font-weight="bold" font-size="10.5" letter-spacing="1.6">MERANGIN</text>
+                        <g stroke="#eab308" stroke-width="2" fill="none">
+                            <rect x="54.5" y="31" width="11" height="4.5" rx="2"/>
+                            <rect x="68" y="34" width="10" height="4.5" rx="2" transform="rotate(24 73 36.25)"/>
+                            <rect x="79" y="41" width="10" height="4.5" rx="2" transform="rotate(48 84 43.25)"/>
+                            <rect x="85" y="52" width="10" height="4.5" rx="2" transform="rotate(72 90 54.25)"/>
+                            <rect x="86" y="64" width="10" height="4.5" rx="2" transform="rotate(96 91 66.25)"/>
+                            <rect x="81" y="76" width="10" height="4.5" rx="2" transform="rotate(120 86 78.25)"/>
+                            <rect x="71" y="85" width="10" height="4.5" rx="2" transform="rotate(144 76 87.25)"/>
+                            <rect x="58" y="89" width="10" height="4.5" rx="2" transform="rotate(168 63 91.25)"/>
+                            <rect x="44" y="87" width="10" height="4.5" rx="2" transform="rotate(192 49 89.25)"/>
+                            <rect x="33" y="79" width="10" height="4.5" rx="2" transform="rotate(216 38 81.25)"/>
+                            <rect x="27" y="68" width="10" height="4.5" rx="2" transform="rotate(240 32 70.25)"/>
+                            <rect x="27" y="55" width="10" height="4.5" rx="2" transform="rotate(264 32 57.25)"/>
+                            <rect x="32" y="44" width="10" height="4.5" rx="2" transform="rotate(288 37 46.25)"/>
+                            <rect x="42" y="35" width="10" height="4.5" rx="2" transform="rotate(312 47 37.25)"/>
+                        </g>
+                        <path d="M52 46 C52 38.5, 57.5 35.5, 60 33 C62.5 35.5, 68 38.5, 68 46 Z" fill="#ffffff" stroke="#111827" stroke-width="0.9"/>
+                        <rect x="47" y="46" width="26" height="3.2" fill="#ffffff" stroke="#111827" stroke-width="0.9"/>
+                        <rect x="43.5" y="49.2" width="33" height="3.2" fill="#111827"/>
+                        <rect x="45.5" y="49.8" width="3.5" height="1.8" fill="#ffffff"/><rect x="52" y="49.8" width="3.5" height="1.8" fill="#ffffff"/>
+                        <rect x="58.2" y="49.8" width="3.5" height="1.8" fill="#ffffff"/><rect x="64.5" y="49.8" width="3.5" height="1.8" fill="#ffffff"/>
+                        <rect x="71" y="49.8" width="3.5" height="1.8" fill="#ffffff"/>
+                        <polygon points="41,52.5 79,52.5 79,56 85,56 85,61.5 35,61.5 35,56 41,56" fill="#ea580c" stroke="#7c2d12" stroke-width="0.8"/>
+                        <path d="M34 74 L49 64 L60 57 L71 64 L86 74 Z" fill="#06b6d4" stroke="#0e7490" stroke-width="0.9"/>
+                        <line x1="46.5" y1="74" x2="40.5" y2="87" stroke="#ffffff" stroke-width="2"/>
+                        <line x1="73.5" y1="74" x2="79.5" y2="87" stroke="#ffffff" stroke-width="2"/>
+                        <rect x="53" y="68" width="14" height="18" fill="#7c2d12" stroke="#431407" stroke-width="0.8"/>
+                        <polygon points="60,50.5 62,64 61,85 59,85 58,64" fill="#ffffff" stroke="#111827" stroke-width="0.9"/>
+                        <rect x="54.5" y="84.5" width="11" height="2.8" rx="1" fill="#111827"/>
+                        <path d="M30 88 Q22 66 29 41" stroke="#16a34a" stroke-width="1.5" fill="none"/>
+                        <g fill="#22c55e" stroke="#15803d" stroke-width="0.7">
+                            <circle cx="28" cy="44" r="3.8"/><circle cx="24.5" cy="52.5" r="3.8"/><circle cx="23" cy="61.5" r="3.8"/>
+                            <circle cx="23" cy="70.5" r="3.8"/><circle cx="25.5" cy="79" r="3.8"/><circle cx="30" cy="86.5" r="3.8"/>
+                        </g>
+                        <g fill="#ffffff">
+                            <circle cx="28.5" cy="42.7" r="2.1"/><circle cx="25" cy="51.2" r="2.1"/><circle cx="23.5" cy="60.2" r="2.1"/>
+                            <circle cx="23.5" cy="69.2" r="2.1"/><circle cx="26" cy="77.7" r="2.1"/><circle cx="30.5" cy="85.2" r="2.1"/>
+                        </g>
+                        <path d="M89 87 Q97 65 90 39" stroke="#eab308" stroke-width="1.6" fill="none"/>
+                        <g fill="#fde047" stroke="#ca8a04" stroke-width="0.7">
+                            <ellipse cx="91" cy="44" rx="2.2" ry="4.2" transform="rotate(28 91 44)"/>
+                            <ellipse cx="93.5" cy="52" rx="2.2" ry="4.2" transform="rotate(25 93.5 52)"/>
+                            <ellipse cx="94.5" cy="60.5" rx="2.2" ry="4.2" transform="rotate(20 94.5 60.5)"/>
+                            <ellipse cx="93.5" cy="69" rx="2.2" ry="4.2" transform="rotate(15 93.5 69)"/>
+                            <ellipse cx="91.5" cy="77" rx="2.2" ry="4.2" transform="rotate(10 91.5 77)"/>
+                            <ellipse cx="89" cy="84.5" rx="2.2" ry="4.2" transform="rotate(5 89 84.5)"/>
+                        </g>
+                        <path d="M31 89 Q60 103 89 89" stroke="#eab308" stroke-width="3.2" fill="none"/>
+                        <line x1="60" y1="87" x2="60" y2="106" stroke="#eab308" stroke-width="2.8"/>
+                        <circle cx="60" cy="97.5" r="4.5" fill="#facc15" stroke="#a16207" stroke-width="1"/>
+                        <polygon points="18,101 27,104.5 24.5,112 16.5,111 20,106.5" fill="#ffffff" stroke="#111827" stroke-width="0.95"/>
+                        <polygon points="102,101 93,104.5 95.5,112 103.5,111 100,106.5" fill="#ffffff" stroke="#111827" stroke-width="0.95"/>
+                        <path d="M24 103 Q60 114 96 103 L93.5 112 Q60 122 26.5 112 Z" fill="#ffffff" stroke="#111827" stroke-width="1"/>
+                        <rect x="47" y="106.5" width="26" height="7" fill="#111827"/>
+                        <circle cx="60" cy="110" r="3" fill="#facc15"/>
+                    </svg>
+                </div>
+
+                <!-- Teks Kop Surat Tengah (Ukuran Huruf 14pt Times New Roman) -->
+                <div class="flex-1 text-center leading-tight text-black">
+                    <div class="font-bold uppercase tracking-wide" style="font-size: 14pt; line-height: 1.25;">PEMERINTAH KABUPATEN MERANGIN</div>
+                    <div class="font-bold uppercase tracking-wide mt-0.5" style="font-size: 14pt; line-height: 1.25;">DINAS PENDIDIKAN DAN KEBUDAYAAN</div>
+                    <div class="font-bold uppercase tracking-wide mt-0.5" style="font-size: 14pt; line-height: 1.25;">SMP NEGERI 56 MERANGIN</div>
+                </div>
+
+                <!-- Logo Sebelah Kanan (Opsional, Muncul Saat Diunggah) -->
+                <div id="ba-kop-logo-right" class="w-[74px] h-[82px] shrink-0 hidden items-center justify-center"></div>
+            </div>
+
+            <!-- Baris Alamat, Email & Kode Pos Miring di Bawah Kop -->
+            <div class="mt-1 px-1 flex flex-wrap items-center justify-between gap-2 text-[10.5px] sm:text-[11px] italic text-black leading-none">
+                <span>Alamat : Jl. Pendidikan No.01 KM 22, Ds. Mampun Baru (B5)</span>
+                <span>email : smpn56merangin@gmail.com</span>
+                <span>Kode Pos 37352</span>
+            </div>
+        </div>
+
+        <div class="text-center mb-4">
+            <h2 class="text-sm font-extrabold uppercase underline tracking-wide">BERITA ACARA PELAKSANAAN UJIAN SEMESTER</h2>
+            <p class="text-xs font-semibold text-slate-700 mt-0.5">(Pelaksanaan Ujian Berbasis Perangkat HP Android / Paperless)</p>
+        </div>
+
+        <p class="text-xs leading-relaxed mb-3 text-justify">
+            Pada hari ini, <strong id="ba-doc-tanggal">-</strong>, telah diselenggarakan Ujian Semester berbasis perangkat HP Android di <strong>SMP Negeri 56 Merangin</strong> dengan rincian pelaksanaan sebagai berikut:
+        </p>
+
+        <table class="w-full text-xs mb-4 border-collapse">
+            <tbody>
+                <tr>
+                    <td class="p-1.5 border border-slate-400 w-6 text-center font-semibold align-top">1.</td>
+                    <td class="p-1.5 border border-slate-400 w-56 font-semibold align-top">Mata Pelajaran</td>
+                    <td class="p-1.5 border border-slate-400 font-bold align-top" id="ba-doc-mapel">-</td>
+                </tr>
+                <tr>
+                    <td class="p-1.5 border border-slate-400 text-center font-semibold align-top">2.</td>
+                    <td class="p-1.5 border border-slate-400 font-semibold align-top">Waktu Pelaksanaan</td>
+                    <td class="p-1.5 border border-slate-400 font-bold align-top" id="ba-doc-waktu">-</td>
+                </tr>
+                <tr>
+                    <td class="p-1.5 border border-slate-400 text-center font-semibold align-top">3.</td>
+                    <td class="p-1.5 border border-slate-400 font-semibold align-top">Ruang Ujian</td>
+                    <td class="p-1.5 border border-slate-400 font-bold align-top" id="ba-doc-ruang">-</td>
+                </tr>
+                <tr>
+                    <td class="p-1.5 border border-slate-400 text-center font-semibold align-top">4.</td>
+                    <td class="p-1.5 border border-slate-400 font-semibold align-top">Moda &amp; Aplikasi Ujian</td>
+                    <td class="p-1.5 border border-slate-400 align-top leading-normal break-words" style="line-height: 1.45; word-break: break-word;" id="ba-doc-moda">-</td>
+                </tr>
+                <tr>
+                    <td class="p-1.5 border border-slate-400 text-center font-semibold align-top">5.</td>
+                    <td class="p-1.5 border border-slate-400 font-semibold align-top">Jumlah Peserta Seharusnya</td>
+                    <td class="p-1.5 border border-slate-400 font-bold align-top"><span id="ba-doc-seharusnya">0</span> orang</td>
+                </tr>
+                <tr>
+                    <td class="p-1.5 border border-slate-400 text-center font-semibold align-top">6.</td>
+                    <td class="p-1.5 border border-slate-400 font-semibold align-top">Jumlah Peserta Hadir</td>
+                    <td class="p-1.5 border border-slate-400 font-bold align-top"><span id="ba-doc-hadir">0</span> orang</td>
+                </tr>
+                <tr>
+                    <td class="p-1.5 border border-slate-400 text-center font-semibold align-top">7.</td>
+                    <td class="p-1.5 border border-slate-400 font-semibold align-top">Jumlah Peserta Tidak Hadir</td>
+                    <td class="p-1.5 border border-slate-400 font-bold align-top"><span id="ba-doc-tidak-hadir">0</span> orang</td>
+                </tr>
+                <tr>
+                    <td class="p-1.5 border border-slate-400 text-center font-semibold align-top">8.</td>
+                    <td class="p-1.5 border border-slate-400 font-semibold align-top">Nomor Peserta Tidak Hadir</td>
+                    <td class="p-1.5 border border-slate-400 font-semibold align-top" id="ba-doc-no-absen">Nihil</td>
+                </tr>
+                <tr>
+                    <td class="p-1.5 border border-slate-400 text-center font-semibold align-top">9.</td>
+                    <td class="p-1.5 border border-slate-400 font-semibold align-top">Status Jaringan &amp; Aplikasi</td>
+                    <td class="p-1.5 border border-slate-400 align-top leading-normal break-words" style="line-height: 1.45; word-break: break-word;" id="ba-doc-jaringan">-</td>
+                </tr>
+                <tr>
+                    <td class="p-1.5 border border-slate-400 text-center font-semibold align-top">10.</td>
+                    <td class="p-1.5 border border-slate-400 font-semibold align-top">Catatan Selama Ujian</td>
+                    <td class="p-1.5 border border-slate-400 align-top leading-normal break-words" style="line-height: 1.45; word-break: break-word;" id="ba-doc-catatan">-</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <p class="text-xs leading-relaxed mb-6 text-justify">
+            Demikian Berita Acara Pelaksanaan Ujian Semester ini dibuat dengan sesungguhnya untuk dapat dipergunakan sebagaimana mestinya.
+        </p>
+
+        <!-- Kolom Tanda Tangan Pengawas Ruang Saja -->
+        <div id="ba-doc-sign-grid" class="grid grid-cols-1 gap-6 text-xs text-center mt-6">
+            <div id="ba-doc-sign-col-1" class="ml-auto w-64">
+                <div>Merangin, <span id="ba-doc-tgl-ttd">-</span></div>
+                <div id="ba-doc-label-p1" class="font-semibold">Pengawas Ruang,</div>
+                <div class="h-16"></div>
+                <div class="font-extrabold underline" id="ba-doc-nama-p1">-</div>
+                <div class="text-[11px]" id="ba-doc-nip-p1">NIP. -</div>
+            </div>
+            <div id="ba-doc-sign-col-2" class="hidden">
+                <div>&nbsp;</div>
+                <div class="font-semibold">Pengawas Ruang II,</div>
+                <div class="h-16"></div>
+                <div class="font-extrabold underline" id="ba-doc-nama-p2">-</div>
+                <div class="text-[11px]" id="ba-doc-nip-p2">NIP. -</div>
+            </div>
+        </div>
+    </section>
+
+    <!-- =========================================================
+         TEMPLATE CETAK & PDF 2: DAFTAR HADIR PESERTA UJIAN
+         ========================================================= -->
+    <section id="print-attendance-sheet" class="doc-times-roman hidden max-w-4xl mx-auto p-6 bg-white text-slate-950" style="font-family: 'Times New Roman', Times, Georgia, serif;">
+        <!-- Kop Surat Resmi Persis Format SMP Negeri 56 Merangin -->
+        <div class="border-b-[3.5px] border-black pb-1 mb-3" style="font-family: 'Times New Roman', Times, Georgia, serif;">
+            <div class="flex items-center justify-between gap-3 px-1">
+                <!-- Logo Sebelah Kiri: Lambang Kabupaten Merangin -->
+                <div id="att-kop-logo-left" class="w-[74px] h-[82px] shrink-0 flex items-center justify-center">
+                    <svg viewBox="0 0 120 136" preserveAspectRatio="xMidYMid meet" fill="none" xmlns="http://www.w3.org/2000/svg" class="w-full h-full">
+                        <path d="M16 16 Q38 24 60 11 Q82 24 104 16 L104 86 C104 108 82 120 60 129 C38 120 16 108 16 86 Z"
+                              fill="#7aa8d6" stroke="#dc2626" stroke-width="3.2" stroke-linejoin="round"/>
+                        <text x="60" y="27" text-anchor="middle" fill="#111827" font-family="'Times New Roman', Times, Georgia, serif" font-weight="bold" font-size="10.5" letter-spacing="1.6">MERANGIN</text>
+                        <g stroke="#eab308" stroke-width="2" fill="none">
+                            <rect x="54.5" y="31" width="11" height="4.5" rx="2"/>
+                            <rect x="68" y="34" width="10" height="4.5" rx="2" transform="rotate(24 73 36.25)"/>
+                            <rect x="79" y="41" width="10" height="4.5" rx="2" transform="rotate(48 84 43.25)"/>
+                            <rect x="85" y="52" width="10" height="4.5" rx="2" transform="rotate(72 90 54.25)"/>
+                            <rect x="86" y="64" width="10" height="4.5" rx="2" transform="rotate(96 91 66.25)"/>
+                            <rect x="81" y="76" width="10" height="4.5" rx="2" transform="rotate(120 86 78.25)"/>
+                            <rect x="71" y="85" width="10" height="4.5" rx="2" transform="rotate(144 76 87.25)"/>
+                            <rect x="58" y="89" width="10" height="4.5" rx="2" transform="rotate(168 63 91.25)"/>
+                            <rect x="44" y="87" width="10" height="4.5" rx="2" transform="rotate(192 49 89.25)"/>
+                            <rect x="33" y="79" width="10" height="4.5" rx="2" transform="rotate(216 38 81.25)"/>
+                            <rect x="27" y="68" width="10" height="4.5" rx="2" transform="rotate(240 32 70.25)"/>
+                            <rect x="27" y="55" width="10" height="4.5" rx="2" transform="rotate(264 32 57.25)"/>
+                            <rect x="32" y="44" width="10" height="4.5" rx="2" transform="rotate(288 37 46.25)"/>
+                            <rect x="42" y="35" width="10" height="4.5" rx="2" transform="rotate(312 47 37.25)"/>
+                        </g>
+                        <path d="M52 46 C52 38.5, 57.5 35.5, 60 33 C62.5 35.5, 68 38.5, 68 46 Z" fill="#ffffff" stroke="#111827" stroke-width="0.9"/>
+                        <rect x="47" y="46" width="26" height="3.2" fill="#ffffff" stroke="#111827" stroke-width="0.9"/>
+                        <rect x="43.5" y="49.2" width="33" height="3.2" fill="#111827"/>
+                        <rect x="45.5" y="49.8" width="3.5" height="1.8" fill="#ffffff"/><rect x="52" y="49.8" width="3.5" height="1.8" fill="#ffffff"/>
+                        <rect x="58.2" y="49.8" width="3.5" height="1.8" fill="#ffffff"/><rect x="64.5" y="49.8" width="3.5" height="1.8" fill="#ffffff"/>
+                        <rect x="71" y="49.8" width="3.5" height="1.8" fill="#ffffff"/>
+                        <polygon points="41,52.5 79,52.5 79,56 85,56 85,61.5 35,61.5 35,56 41,56" fill="#ea580c" stroke="#7c2d12" stroke-width="0.8"/>
+                        <path d="M34 74 L49 64 L60 57 L71 64 L86 74 Z" fill="#06b6d4" stroke="#0e7490" stroke-width="0.9"/>
+                        <line x1="46.5" y1="74" x2="40.5" y2="87" stroke="#ffffff" stroke-width="2"/>
+                        <line x1="73.5" y1="74" x2="79.5" y2="87" stroke="#ffffff" stroke-width="2"/>
+                        <rect x="53" y="68" width="14" height="18" fill="#7c2d12" stroke="#431407" stroke-width="0.8"/>
+                        <polygon points="60,50.5 62,64 61,85 59,85 58,64" fill="#ffffff" stroke="#111827" stroke-width="0.9"/>
+                        <rect x="54.5" y="84.5" width="11" height="2.8" rx="1" fill="#111827"/>
+                        <path d="M30 88 Q22 66 29 41" stroke="#16a34a" stroke-width="1.5" fill="none"/>
+                        <g fill="#22c55e" stroke="#15803d" stroke-width="0.7">
+                            <circle cx="28" cy="44" r="3.8"/><circle cx="24.5" cy="52.5" r="3.8"/><circle cx="23" cy="61.5" r="3.8"/>
+                            <circle cx="23" cy="70.5" r="3.8"/><circle cx="25.5" cy="79" r="3.8"/><circle cx="30" cy="86.5" r="3.8"/>
+                        </g>
+                        <g fill="#ffffff">
+                            <circle cx="28.5" cy="42.7" r="2.1"/><circle cx="25" cy="51.2" r="2.1"/><circle cx="23.5" cy="60.2" r="2.1"/>
+                            <circle cx="23.5" cy="69.2" r="2.1"/><circle cx="26" cy="77.7" r="2.1"/><circle cx="30.5" cy="85.2" r="2.1"/>
+                        </g>
+                        <path d="M89 87 Q97 65 90 39" stroke="#eab308" stroke-width="1.6" fill="none"/>
+                        <g fill="#fde047" stroke="#ca8a04" stroke-width="0.7">
+                            <ellipse cx="91" cy="44" rx="2.2" ry="4.2" transform="rotate(28 91 44)"/>
+                            <ellipse cx="93.5" cy="52" rx="2.2" ry="4.2" transform="rotate(25 93.5 52)"/>
+                            <ellipse cx="94.5" cy="60.5" rx="2.2" ry="4.2" transform="rotate(20 94.5 60.5)"/>
+                            <ellipse cx="93.5" cy="69" rx="2.2" ry="4.2" transform="rotate(15 93.5 69)"/>
+                            <ellipse cx="91.5" cy="77" rx="2.2" ry="4.2" transform="rotate(10 91.5 77)"/>
+                            <ellipse cx="89" cy="84.5" rx="2.2" ry="4.2" transform="rotate(5 89 84.5)"/>
+                        </g>
+                        <path d="M31 89 Q60 103 89 89" stroke="#eab308" stroke-width="3.2" fill="none"/>
+                        <line x1="60" y1="87" x2="60" y2="106" stroke="#eab308" stroke-width="2.8"/>
+                        <circle cx="60" cy="97.5" r="4.5" fill="#facc15" stroke="#a16207" stroke-width="1"/>
+                        <polygon points="18,101 27,104.5 24.5,112 16.5,111 20,106.5" fill="#ffffff" stroke="#111827" stroke-width="0.95"/>
+                        <polygon points="102,101 93,104.5 95.5,112 103.5,111 100,106.5" fill="#ffffff" stroke="#111827" stroke-width="0.95"/>
+                        <path d="M24 103 Q60 114 96 103 L93.5 112 Q60 122 26.5 112 Z" fill="#ffffff" stroke="#111827" stroke-width="1"/>
+                        <rect x="47" y="106.5" width="26" height="7" fill="#111827"/>
+                        <circle cx="60" cy="110" r="3" fill="#facc15"/>
+                    </svg>
+                </div>
+
+                <!-- Teks Kop Surat Tengah (Ukuran Huruf 14pt Times New Roman) -->
+                <div class="flex-1 text-center leading-tight text-black">
+                    <div class="font-bold uppercase tracking-wide" style="font-size: 14pt; line-height: 1.25;">PEMERINTAH KABUPATEN MERANGIN</div>
+                    <div class="font-bold uppercase tracking-wide mt-0.5" style="font-size: 14pt; line-height: 1.25;">DINAS PENDIDIKAN DAN KEBUDAYAAN</div>
+                    <div class="font-bold uppercase tracking-wide mt-0.5" style="font-size: 14pt; line-height: 1.25;">SMP NEGERI 56 MERANGIN</div>
+                </div>
+
+                <!-- Logo Sebelah Kanan (Opsional, Muncul Saat Diunggah) -->
+                <div id="att-kop-logo-right" class="w-[74px] h-[82px] shrink-0 hidden items-center justify-center"></div>
+            </div>
+
+            <!-- Baris Alamat, Email & Kode Pos Miring di Bawah Kop -->
+            <div class="mt-1 px-1 flex flex-wrap items-center justify-between gap-2 text-[10.5px] sm:text-[11px] italic text-black leading-none">
+                <span>Alamat : Jl. Pendidikan No.01 KM 22, Ds. Mampun Baru (B5)</span>
+                <span>email : smpn56merangin@gmail.com</span>
+                <span>Kode Pos 37352</span>
+            </div>
+        </div>
+
+        <div class="text-center mb-3">
+            <h2 class="text-sm font-extrabold uppercase underline tracking-wide">DAFTAR HADIR PESERTA UJIAN SEMESTER</h2>
+        </div>
+
+        <div class="grid grid-cols-2 gap-x-6 gap-y-1 text-xs mb-4">
+            <div>Mata Pelajaran : <strong id="prt-mapel">-</strong></div>
+            <div>Tanggal : <strong id="prt-tanggal">-</strong></div>
+            <div>Waktu Pelaksanaan : <strong id="prt-waktu">-</strong></div>
+            <div>Ruang Ujian : <strong id="prt-ruang">-</strong></div>
+        </div>
+
+        <table class="w-full text-xs border-collapse mb-6">
+            <thead>
+                <tr class="bg-slate-100">
+                    <th class="border border-slate-700 p-1.5 text-center w-10">No</th>
+                    <th class="border border-slate-700 p-1.5 text-left">Nomor Peserta</th>
+                    <th class="border border-slate-700 p-1.5 text-left">NISN</th>
+                    <th class="border border-slate-700 p-1.5 text-left">Nama Peserta Ujian</th>
+                    <th class="border border-slate-700 p-1.5 text-center">Kelas</th>
+                    <th class="border border-slate-700 p-1.5 text-center">Waktu / Ket.</th>
+                    <th class="border border-slate-700 p-1.5 text-center">Status</th>
+                </tr>
+            </thead>
+            <tbody id="print-attendance-tbody">
+                <!-- Baris cetak dirender oleh JS -->
+            </tbody>
+        </table>
+
+        <div class="flex justify-end text-xs text-center mt-6">
+            <div class="w-64">
+                <div>Merangin, <span id="prt-tanggal-ttd">-</span></div>
+                <div class="font-semibold">Pengawas Ruang,</div>
+                <div class="h-16"></div>
+                <div class="font-extrabold underline" id="prt-pengawas">-</div>
+                <div class="text-[11px]" id="prt-nip">NIP. -</div>
+            </div>
+        </div>
+    </section>
+
+    <script>
+        /* =========================================================
+           KONSTANTA & STATE PENYIMPANAN LOKAL
+           ========================================================= */
+        const STORAGE_ATTENDANCE = 'smpn56_att_logs_v2';
+        const STORAGE_MASTER = 'smpn56_att_master_v2';
+        const STORAGE_SESSION = 'smpn56_att_session_v2';
+        const STORAGE_BA = 'smpn56_att_ba_v2';
+        const STORAGE_KOP_LOGOS = 'smpn56_att_kop_logos_v2';
+
+        let attendanceLogs = [];
+        let masterStudents = [];
+        let kopLogos = { left: '', right: '' };
+        let defaultKopLeftHtml = '';
+
+        let sessionMeta = {
+            mapel: 'Bahasa Indonesia',
+            tanggal: new Date().toISOString().split('T')[0],
+            waktu: '07.30 - 09.30 WIB',
+            ruang: 'Ruang 01',
+            pengawas: 'Guru Pengawas Ruang',
+            nip: '',
+            jumlahSiswaRuangan: ''
+        };
+
+        let beritaAcaraMeta = {
+            modaUjian: 'Daring / Online via HP Android (Paperless)',
+            aplikasiUjian: 'ExamBrowser / Google Form / CBT Sekolah',
+            totalSeharusnya: '',
+            totalHadir: '',
+            noTidakHadir: 'Nihil',
+            statusJaringan: 'Lancar dan stabil dari awal hingga akhir sesi ujian',
+            catatan: 'Pelaksanaan ujian menggunakan perangkat HP Android berjalan tertib, lancar, dan kondusif.',
+            pengawas2: '',
+            nip2: ''
+        };
+
+        /* =========================================================
+           PEMINDAIAN QR CODE (KAMERA LIVE NATIVE APK/WEBVIEW & MANUAL)
+           ========================================================= */
+        let activeVideoStream = null;
+        let qrScanInterval = null;
+        let lastScannedRaw = '';
+        let lastScannedAt = 0;
+
+        async function startCameraScanner() {
+            const videoEl = document.getElementById('qr-video');
+            const placeholderEl = document.getElementById('cam-placeholder');
+            const overlayEl = document.getElementById('qr-target-overlay');
+            const indicatorEl = document.getElementById('cam-indicator');
+            const btnStart = document.getElementById('btn-start-cam');
+            const btnStop = document.getElementById('btn-stop-cam');
+            const statusTitle = document.getElementById('cam-status-title');
+            const statusDesc = document.getElementById('cam-status-desc');
+            const fallbackPhotoWrap = document.getElementById('btn-fallback-photo-wrap');
+            const facingPref = document.getElementById('camera-select')?.value || 'environment';
+
+            stopCameraScanner(true);
+            if (fallbackPhotoWrap) fallbackPhotoWrap.classList.add('hidden');
+
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                if (statusTitle) statusTitle.textContent = 'Kamera Tidak Didukung Peramban Ini';
+                if (statusDesc) statusDesc.textContent = 'Gunakan tombol cadangan "📸 Ambil Foto QR" atau ketik manual Nomor Peserta di bawah.';
+                if (fallbackPhotoWrap) fallbackPhotoWrap.classList.remove('hidden');
+                showToast('Peramban tidak mendukung akses kamera langsung. Gunakan tombol Foto QR.', 'warning');
+                return;
+            }
+
+            const constraintAttempts = [
+                { video: { facingMode: { ideal: facingPref }, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false },
+                { video: { facingMode: facingPref }, audio: false },
+                { video: true, audio: false }
+            ];
+
+            let stream = null;
+            let lastErr = null;
+            for (const c of constraintAttempts) {
+                try {
+                    stream = await navigator.mediaDevices.getUserMedia(c);
+                    if (stream) break;
+                } catch (err) {
+                    lastErr = err;
+                }
+            }
+
+            if (!stream) {
+                const reason = lastErr?.name === 'NotAllowedError'
+                    ? 'Izin kamera ditolak oleh pengguna atau pengaturan HP/APK.'
+                    : (lastErr?.message || 'Perangkat kamera tidak ditemukan atau sedang dipakai aplikasi lain.');
+                if (statusTitle) statusTitle.textContent = 'Gagal Membuka Kamera';
+                if (statusDesc) statusDesc.textContent = `${reason} Silakan gunakan tombol "📸 Ambil Foto QR" sebagai alternatif.`;
+                if (fallbackPhotoWrap) fallbackPhotoWrap.classList.remove('hidden');
+                showToast(`Gagal mengaktifkan kamera: ${reason}`, 'error');
+                return;
+            }
+
+            activeVideoStream = stream;
+            videoEl.srcObject = stream;
+            videoEl.classList.remove('hidden');
+            if (placeholderEl) placeholderEl.classList.add('hidden');
+            if (overlayEl) overlayEl.classList.remove('hidden');
+            if (indicatorEl) {
+                indicatorEl.classList.remove('bg-slate-300');
+                indicatorEl.classList.add('bg-emerald-500', 'animate-pulse');
+            }
+            if (btnStart) btnStart.classList.add('hidden');
+            if (btnStop) btnStop.classList.remove('hidden');
+
+            try {
+                await videoEl.play();
+            } catch (e) {}
+
+            startQrDecodeLoop();
+            showToast('Kamera pemindai QR aktif. Arahkan ke QR Code kartu peserta.', 'success');
+        }
+
+        function stopCameraScanner(silent = false) {
+            if (qrScanInterval) {
+                clearInterval(qrScanInterval);
+                qrScanInterval = null;
+            }
+            if (activeVideoStream) {
+                activeVideoStream.getTracks().forEach(t => t.stop());
+                activeVideoStream = null;
+            }
+
+            const videoEl = document.getElementById('qr-video');
+            const placeholderEl = document.getElementById('cam-placeholder');
+            const overlayEl = document.getElementById('qr-target-overlay');
+            const indicatorEl = document.getElementById('cam-indicator');
+            const btnStart = document.getElementById('btn-start-cam');
+            const btnStop = document.getElementById('btn-stop-cam');
+
+            if (videoEl) {
+                videoEl.pause();
+                videoEl.srcObject = null;
+                videoEl.classList.add('hidden');
+            }
+            if (placeholderEl) placeholderEl.classList.remove('hidden');
+            if (overlayEl) overlayEl.classList.add('hidden');
+            if (indicatorEl) {
+                indicatorEl.classList.remove('bg-emerald-500', 'animate-pulse');
+                indicatorEl.classList.add('bg-slate-300');
+            }
+            if (btnStart) btnStart.classList.remove('hidden');
+            if (btnStop) btnStop.classList.add('hidden');
+
+            if (!silent) {
+                showToast('Kamera pemindai dimatikan.', 'info');
+            }
+        }
+
+        function switchCameraDevice() {
+            if (activeVideoStream) {
+                startCameraScanner();
+            }
+        }
+
+        function startQrDecodeLoop() {
+            const videoEl = document.getElementById('qr-video');
+            const canvasEl = document.getElementById('qr-hidden-canvas');
+            if (!videoEl || !canvasEl) return;
+
+            const ctx = canvasEl.getContext('2d', { willReadFrequently: true });
+            const hasNativeDetector = ('BarcodeDetector' in window);
+            const detector = hasNativeDetector ? new window.BarcodeDetector({ formats: ['qr_code'] }) : null;
+
+            qrScanInterval = setInterval(async () => {
+                if (!activeVideoStream || videoEl.readyState < 2) return;
+
+                if (detector) {
+                    try {
+                        const codes = await detector.detect(videoEl);
+                        if (codes && codes.length > 0 && codes[0].rawValue) {
+                            handleDetectedQrText(codes[0].rawValue);
+                            return;
+                        }
+                    } catch (e) {}
+                }
+
+                if (typeof jsQR !== 'undefined') {
+                    const targetW = 640;
+                    const ratio = videoEl.videoHeight && videoEl.videoWidth
+                        ? (videoEl.videoHeight / videoEl.videoWidth)
+                        : 0.75;
+                    canvasEl.width = targetW;
+                    canvasEl.height = Math.round(targetW * ratio);
+                    ctx.drawImage(videoEl, 0, 0, canvasEl.width, canvasEl.height);
+                    const imgData = ctx.getImageData(0, 0, canvasEl.width, canvasEl.height);
+                    const code = jsQR(imgData.data, imgData.width, imgData.height, { inversionAttempts: 'attemptBoth' });
+                    if (code && code.data) {
+                        handleDetectedQrText(code.data);
+                    }
+                }
+            }, 260);
+        }
+
+        /* =========================================================
+           INISIALISASI APLIKASI & JAM DIGITAL LIVE
+           ========================================================= */
+        window.addEventListener('DOMContentLoaded', () => {
+            const leftDefaultEl = document.getElementById('ba-kop-logo-left');
+            if (leftDefaultEl) {
+                defaultKopLeftHtml = leftDefaultEl.innerHTML;
+            }
+            startLiveDigitalClock();
+            loadAllState();
+            applyKopLogos();
+            applySessionInputs();
+            updateStats();
+            renderAttendanceTable();
+            syncPrintHeaderMeta();
+            syncBeritaAcaraDocument();
+        });
+
+        function startLiveDigitalClock() {
+            const clockEl = document.getElementById('live-digital-clock');
+            const dateEl = document.getElementById('live-digital-date');
+            const hariList = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+            const bulanList = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
+
+            const updateClock = () => {
+                const now = new Date();
+                const hh = String(now.getHours()).padStart(2, '0');
+                const mm = String(now.getMinutes()).padStart(2, '0');
+                const ss = String(now.getSeconds()).padStart(2, '0');
+                if (clockEl) clockEl.textContent = `${hh}:${mm}:${ss} WIB`;
+                if (dateEl) {
+                    dateEl.textContent = `${hariList[now.getDay()]}, ${now.getDate()} ${bulanList[now.getMonth()]} ${now.getFullYear()}`;
+                }
+            };
+
+            updateClock();
+            setInterval(updateClock, 1000);
+        }
+
+        function loadAllState() {
+            try {
+                const rawAtt = localStorage.getItem(STORAGE_ATTENDANCE);
+                attendanceLogs = rawAtt ? JSON.parse(rawAtt) : [];
+                if (!Array.isArray(attendanceLogs)) attendanceLogs = [];
+            } catch (e) {
+                attendanceLogs = [];
+            }
+
+            try {
+                const rawMaster = localStorage.getItem(STORAGE_MASTER);
+                masterStudents = rawMaster ? JSON.parse(rawMaster) : [];
+                if (!Array.isArray(masterStudents)) masterStudents = [];
+            } catch (e) {
+                masterStudents = [];
+            }
+
+            try {
+                const rawSes = localStorage.getItem(STORAGE_SESSION);
+                if (rawSes) {
+                    sessionMeta = { ...sessionMeta, ...JSON.parse(rawSes) };
+                }
+            } catch (e) {}
+
+            try {
+                const rawBa = localStorage.getItem(STORAGE_BA);
+                if (rawBa) {
+                    beritaAcaraMeta = { ...beritaAcaraMeta, ...JSON.parse(rawBa) };
+                }
+            } catch (e) {}
+
+            try {
+                const rawLogos = localStorage.getItem(STORAGE_KOP_LOGOS);
+                if (rawLogos) {
+                    kopLogos = { left: '', right: '', ...JSON.parse(rawLogos) };
+                }
+            } catch (e) {}
+        }
+
+        function saveAllState() {
+            try {
+                localStorage.setItem(STORAGE_ATTENDANCE, JSON.stringify(attendanceLogs));
+                localStorage.setItem(STORAGE_MASTER, JSON.stringify(masterStudents));
+                localStorage.setItem(STORAGE_SESSION, JSON.stringify(sessionMeta));
+                localStorage.setItem(STORAGE_BA, JSON.stringify(beritaAcaraMeta));
+                localStorage.setItem(STORAGE_KOP_LOGOS, JSON.stringify(kopLogos));
+            } catch (e) {
+                console.warn('Gagal menyimpan state:', e);
+            }
+        }
+
+        function handleKopLogoUpload(side, event) {
+            const file = event.target.files?.[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                kopLogos[side] = e.target.result;
+                saveAllState();
+                applyKopLogos();
+                syncBeritaAcaraDocument();
+                showToast(`Logo ${side === 'left' ? 'kiri (Kabupaten)' : 'kanan (Sekolah)'} kop surat berhasil diperbarui.`, 'success');
+            };
+            reader.readAsDataURL(file);
+            event.target.value = '';
+        }
+
+        function resetKopLogos() {
+            kopLogos = { left: '', right: '' };
+            saveAllState();
+            applyKopLogos();
+            syncBeritaAcaraDocument();
+            showToast('Logo kop surat dikembalikan ke bawaan Kabupaten Merangin.', 'info');
+        }
+
+        function applyKopLogos() {
+            const leftSlots = ['ba-kop-logo-left', 'att-kop-logo-left'];
+            const rightSlots = ['ba-kop-logo-right', 'att-kop-logo-right'];
+
+            leftSlots.forEach(id => {
+                const el = document.getElementById(id);
+                if (!el) return;
+                if (kopLogos.left) {
+                    el.innerHTML = `<img src="${kopLogos.left}" alt="Logo Kiri (Kabupaten)" style="max-width:74px;max-height:82px;width:auto;height:auto;object-fit:contain;">`;
+                } else if (defaultKopLeftHtml) {
+                    el.innerHTML = defaultKopLeftHtml;
+                }
+            });
+
+            rightSlots.forEach(id => {
+                const el = document.getElementById(id);
+                if (!el) return;
+                if (kopLogos.right) {
+                    el.classList.remove('hidden');
+                    el.classList.add('flex');
+                    el.innerHTML = `<img src="${kopLogos.right}" alt="Logo Kanan (Sekolah)" style="max-width:74px;max-height:82px;width:auto;height:auto;object-fit:contain;">`;
+                } else {
+                    el.classList.add('hidden');
+                    el.classList.remove('flex');
+                    el.innerHTML = '';
+                }
+            });
+        }
+
+        function cleanWaktuPelaksanaan(rawText) {
+            return String(rawText || '').trim() || '07.30 - 09.30 WIB';
+        }
+
+        function formatTanggalIndonesia(isoDate) {
+            if (!isoDate) return '-';
+            const bulan = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
+            const hari = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+            const parts = String(isoDate).split('-');
+            if (parts.length !== 3) return isoDate;
+            const d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+            if (isNaN(d.getTime())) return isoDate;
+            return `${hari[d.getDay()]}, ${d.getDate()} ${bulan[d.getMonth()]} ${d.getFullYear()}`;
+        }
+
+        function formatTanggalSingkat(isoDate) {
+            if (!isoDate) return '-';
+            const bulan = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
+            const parts = String(isoDate).split('-');
+            if (parts.length !== 3) return isoDate;
+            const mIdx = Number(parts[1]) - 1;
+            if (mIdx < 0 || mIdx > 11) return isoDate;
+            return `${Number(parts[2])} ${bulan[mIdx]} ${parts[0]}`;
+        }
+
+        function normalizeRoomName(roomStr) {
+            return String(roomStr || '')
+                .toLowerCase()
+                .replace(/ruang|ruangan|r\.|r/g, '')
+                .replace(/^0+/, '')
+                .trim();
+        }
+
+        function applySessionInputs() {
+            const mapelEl = document.getElementById('ses-mapel');
+            const mapelCustomEl = document.getElementById('ses-mapel-custom');
+            const tglEl = document.getElementById('ses-tanggal');
+            const waktuEl = document.getElementById('ses-waktu');
+            const ruangEl = document.getElementById('ses-ruang');
+            const pengawasEl = document.getElementById('ses-pengawas');
+            const nipEl = document.getElementById('ses-nip');
+            const jumlahEl = document.getElementById('ses-jumlah-siswa');
+
+            if (mapelEl) {
+                const targetVal = sessionMeta.mapel || 'Bahasa Indonesia';
+                const hasOption = Array.from(mapelEl.options).some(opt => opt.value === targetVal && opt.value !== '__CUSTOM__');
+                if (hasOption) {
+                    mapelEl.value = targetVal;
+                    if (mapelCustomEl) mapelCustomEl.classList.add('hidden');
+                } else {
+                    mapelEl.value = '__CUSTOM__';
+                    if (mapelCustomEl) {
+                        mapelCustomEl.classList.remove('hidden');
+                        mapelCustomEl.value = targetVal;
+                    }
+                }
+            }
+            if (tglEl) tglEl.value = sessionMeta.tanggal || new Date().toISOString().split('T')[0];
+            if (waktuEl) waktuEl.value = sessionMeta.waktu || '07.30 - 09.30 WIB';
+            if (ruangEl) ruangEl.value = sessionMeta.ruang || 'Ruang 01';
+            if (pengawasEl) pengawasEl.value = sessionMeta.pengawas || '';
+            if (nipEl) nipEl.value = sessionMeta.nip || '';
+            if (jumlahEl) jumlahEl.value = sessionMeta.jumlahSiswaRuangan !== undefined ? sessionMeta.jumlahSiswaRuangan : '';
+        }
+
+        function handleMapelSelectChange() {
+            const mapelEl = document.getElementById('ses-mapel');
+            const mapelCustomEl = document.getElementById('ses-mapel-custom');
+            if (mapelEl && mapelCustomEl) {
+                if (mapelEl.value === '__CUSTOM__') {
+                    mapelCustomEl.classList.remove('hidden');
+                    mapelCustomEl.focus();
+                } else {
+                    mapelCustomEl.classList.add('hidden');
+                }
+            }
+            saveSessionMeta();
+        }
+
+        function saveSessionMeta() {
+            const mapelEl = document.getElementById('ses-mapel');
+            const mapelCustomEl = document.getElementById('ses-mapel-custom');
+            if (mapelEl && mapelEl.value === '__CUSTOM__') {
+                sessionMeta.mapel = mapelCustomEl?.value.trim() || 'Bahasa Indonesia';
+            } else {
+                sessionMeta.mapel = mapelEl?.value.trim() || 'Bahasa Indonesia';
+            }
+            sessionMeta.tanggal = document.getElementById('ses-tanggal')?.value || new Date().toISOString().split('T')[0];
+            sessionMeta.waktu = cleanWaktuPelaksanaan(document.getElementById('ses-waktu')?.value);
+            sessionMeta.ruang = document.getElementById('ses-ruang')?.value.trim() || 'Ruang 01';
+            sessionMeta.pengawas = document.getElementById('ses-pengawas')?.value.trim() || 'Guru Pengawas Ruang';
+            sessionMeta.nip = document.getElementById('ses-nip')?.value.trim() || '';
+            const rawJumlah = document.getElementById('ses-jumlah-siswa')?.value;
+            sessionMeta.jumlahSiswaRuangan = rawJumlah !== undefined ? String(rawJumlah).trim() : '';
+
+            saveAllState();
+            updateStats();
+            syncPrintHeaderMeta();
+            recalcBeritaAcaraCounts(true);
+        }
+
+        function syncPrintHeaderMeta() {
+            const mapel = sessionMeta.mapel || '-';
+            const tglFormatted = formatTanggalIndonesia(sessionMeta.tanggal);
+            const tglSingkat = formatTanggalSingkat(sessionMeta.tanggal);
+            const waktu = sessionMeta.waktu || '-';
+            const ruang = sessionMeta.ruang || '-';
+            const pengawas = sessionMeta.pengawas || '-';
+            const nip = sessionMeta.nip ? `NIP. ${sessionMeta.nip}` : 'NIP. -';
+
+            const setTxt = (id, val) => {
+                const el = document.getElementById(id);
+                if (el) el.textContent = val;
+            };
+
+            setTxt('prt-mapel', mapel);
+            setTxt('prt-tanggal', tglFormatted);
+            setTxt('prt-waktu', waktu);
+            setTxt('prt-ruang', ruang);
+            setTxt('prt-tanggal-ttd', tglSingkat);
+            setTxt('prt-pengawas', pengawas);
+            setTxt('prt-nip', nip);
+        }
+
+        /* =========================================================
+           PERHITUNGAN STATISTIK KEHADIRAN & DATA RUANGAN
+           ========================================================= */
+        function getRoomFilteredMaster() {
+            const targetNorm = normalizeRoomName(sessionMeta.ruang);
+            if (!targetNorm) return masterStudents;
+            const matched = masterStudents.filter(m => normalizeRoomName(m.ruang) === targetNorm);
+            return matched.length > 0 ? matched : masterStudents;
+        }
+
+        function getComputedCounts() {
+            const roomMaster = getRoomFilteredMaster();
+            const hadirLogs = attendanceLogs.filter(l => (l.status || 'HADIR') === 'HADIR');
+            const explicitAbsentLogs = attendanceLogs.filter(l => (l.status || 'HADIR') !== 'HADIR');
+            const manualRoomCount = (sessionMeta.jumlahSiswaRuangan !== '' && sessionMeta.jumlahSiswaRuangan !== null && sessionMeta.jumlahSiswaRuangan !== undefined)
+                ? Math.max(0, parseInt(sessionMeta.jumlahSiswaRuangan, 10) || 0)
+                : null;
+
+            const totalTerdaftar = manualRoomCount !== null
+                ? manualRoomCount
+                : (roomMaster.length > 0
+                    ? roomMaster.length
+                    : (hadirLogs.length + explicitAbsentLogs.length));
+
+            const totalHadir = hadirLogs.length;
+
+            const absentNumbers = [];
+            if (roomMaster.length > 0) {
+                roomMaster.forEach(st => {
+                    const isHadir = hadirLogs.some(h =>
+                        (st.no && h.no && st.no.toUpperCase() === h.no.toUpperCase()) ||
+                        (st.nisn && st.nisn !== '-' && h.nisn && st.nisn === h.nisn) ||
+                        (st.nama && h.nama && st.nama.toUpperCase() === h.nama.toUpperCase())
+                    );
+                    if (!isHadir) {
+                        const foundExplicit = explicitAbsentLogs.find(a =>
+                            (st.no && a.no && st.no.toUpperCase() === a.no.toUpperCase()) ||
+                            (st.nama && a.nama && st.nama.toUpperCase() === a.nama.toUpperCase())
+                        );
+                        const labelKet = foundExplicit ? ` (${foundExplicit.status})` : '';
+                        absentNumbers.push(`${st.no || st.nama}${labelKet}`);
+                    }
+                });
+                explicitAbsentLogs.forEach(a => {
+                    const alreadyInMaster = roomMaster.some(st =>
+                        (st.no && a.no && st.no.toUpperCase() === a.no.toUpperCase()) ||
+                        (st.nama && a.nama && st.nama.toUpperCase() === a.nama.toUpperCase())
+                    );
+                    if (!alreadyInMaster) {
+                        absentNumbers.push(`${a.no || a.nama} (${a.status})`);
+                    }
+                });
+            } else {
+                explicitAbsentLogs.forEach(a => {
+                    absentNumbers.push(`${a.no || a.nama} (${a.status})`);
+                });
+            }
+
+            const totalTidakHadir = Math.max(0, totalTerdaftar - totalHadir, explicitAbsentLogs.length);
+            const noTidakHadirText = absentNumbers.length > 0 ? absentNumbers.join(', ') : 'Nihil';
+
+            return {
+                totalTerdaftar,
+                totalHadir,
+                totalTidakHadir,
+                noTidakHadirText
+            };
+        }
+
+        function updateStats() {
+            const { totalTerdaftar, totalHadir, totalTidakHadir } = getComputedCounts();
+            const persen = totalTerdaftar > 0 ? Math.round((totalHadir / totalTerdaftar) * 100) : (totalHadir > 0 ? 100 : 0);
+
+            const elTotal = document.getElementById('stat-total');
+            const elHadir = document.getElementById('stat-hadir');
+            const elBelum = document.getElementById('stat-belum');
+            const elPersen = document.getElementById('stat-persen');
+
+            if (elTotal) elTotal.textContent = totalTerdaftar;
+            if (elHadir) elHadir.textContent = totalHadir;
+            if (elBelum) elBelum.textContent = totalTidakHadir;
+            if (elPersen) elPersen.textContent = `${persen}%`;
+        }
+
+        /* =========================================================
+           BERITA ACARA UJIAN: SINKRONISASI, GENERATE & LIVE PRATINJAU
+           ========================================================= */
+        function openBeritaAcaraModal() {
+            recalcBeritaAcaraCounts(true);
+            const modal = document.getElementById('berita-acara-modal');
+            if (modal) {
+                modal.classList.remove('hidden');
+                modal.classList.add('flex');
+            }
+        }
+
+        function closeBeritaAcaraModal() {
+            const modal = document.getElementById('berita-acara-modal');
+            if (modal) {
+                modal.classList.add('hidden');
+                modal.classList.remove('flex');
+            }
+        }
+
+        function recalcBeritaAcaraCounts(overwriteNumbers = true) {
+            const counts = getComputedCounts();
+
+            const badgeRuang = document.getElementById('ba-auto-ruang-badge');
+            const badgePengawas = document.getElementById('ba-auto-pengawas-badge');
+            const badgeNip = document.getElementById('ba-auto-nip-badge');
+
+            if (badgeRuang) badgeRuang.textContent = sessionMeta.ruang || '-';
+            if (badgePengawas) badgePengawas.textContent = sessionMeta.pengawas || '-';
+            if (badgeNip) badgeNip.textContent = sessionMeta.nip || '-';
+
+            const inpModa = document.getElementById('ba-moda-ujian');
+            const inpApk = document.getElementById('ba-aplikasi-ujian');
+            const inpSeharusnya = document.getElementById('ba-total-seharusnya');
+            const inpHadir = document.getElementById('ba-total-hadir');
+            const inpTidakHadir = document.getElementById('ba-total-tidak-hadir');
+            const inpNoTidakHadir = document.getElementById('ba-no-tidak-hadir');
+            const inpJaringan = document.getElementById('ba-status-jaringan');
+            const inpCatatan = document.getElementById('ba-catatan');
+            const inpP2 = document.getElementById('ba-pengawas-2');
+            const inpNip2 = document.getElementById('ba-nip-2');
+
+            if (inpModa && beritaAcaraMeta.modaUjian) inpModa.value = beritaAcaraMeta.modaUjian;
+            if (inpApk && beritaAcaraMeta.aplikasiUjian) inpApk.value = beritaAcaraMeta.aplikasiUjian;
+            if (inpJaringan && beritaAcaraMeta.statusJaringan) inpJaringan.value = beritaAcaraMeta.statusJaringan;
+            if (inpCatatan && beritaAcaraMeta.catatan) inpCatatan.value = beritaAcaraMeta.catatan;
+            if (inpP2) inpP2.value = beritaAcaraMeta.pengawas2 || '';
+            if (inpNip2) inpNip2.value = beritaAcaraMeta.nip2 || '';
+
+            if (overwriteNumbers) {
+                if (inpSeharusnya) inpSeharusnya.value = counts.totalTerdaftar;
+                if (inpHadir) inpHadir.value = counts.totalHadir;
+                if (inpTidakHadir) inpTidakHadir.value = counts.totalTidakHadir;
+                if (inpNoTidakHadir) inpNoTidakHadir.value = counts.noTidakHadirText;
+            } else {
+                const sVal = parseInt(inpSeharusnya?.value || '0', 10) || 0;
+                const hVal = parseInt(inpHadir?.value || '0', 10) || 0;
+                if (inpTidakHadir) inpTidakHadir.value = Math.max(0, sVal - hVal);
+            }
+
+            syncBeritaAcaraDocument();
+        }
+
+        function saveBeritaAcaraMeta(fromCountInput = false) {
+            const inpModa = document.getElementById('ba-moda-ujian');
+            const inpApk = document.getElementById('ba-aplikasi-ujian');
+            const inpSeharusnya = document.getElementById('ba-total-seharusnya');
+            const inpHadir = document.getElementById('ba-total-hadir');
+            const inpTidakHadir = document.getElementById('ba-total-tidak-hadir');
+            const inpNoTidakHadir = document.getElementById('ba-no-tidak-hadir');
+            const inpJaringan = document.getElementById('ba-status-jaringan');
+            const inpCatatan = document.getElementById('ba-catatan');
+            const inpP2 = document.getElementById('ba-pengawas-2');
+            const inpNip2 = document.getElementById('ba-nip-2');
+
+            if (fromCountInput && inpSeharusnya && inpHadir && inpTidakHadir) {
+                const sVal = Math.max(0, parseInt(inpSeharusnya.value || '0', 10) || 0);
+                const hVal = Math.max(0, parseInt(inpHadir.value || '0', 10) || 0);
+                inpTidakHadir.value = Math.max(0, sVal - hVal);
+            }
+
+            beritaAcaraMeta = {
+                modaUjian: inpModa ? inpModa.value : beritaAcaraMeta.modaUjian,
+                aplikasiUjian: inpApk ? inpApk.value.trim() : beritaAcaraMeta.aplikasiUjian,
+                totalSeharusnya: inpSeharusnya ? inpSeharusnya.value : '',
+                totalHadir: inpHadir ? inpHadir.value : '',
+                noTidakHadir: inpNoTidakHadir ? (inpNoTidakHadir.value.trim() || 'Nihil') : 'Nihil',
+                statusJaringan: inpJaringan ? inpJaringan.value : beritaAcaraMeta.statusJaringan,
+                catatan: inpCatatan ? inpCatatan.value.trim() : beritaAcaraMeta.catatan,
+                pengawas2: inpP2 ? inpP2.value.trim() : '',
+                nip2: inpNip2 ? inpNip2.value.trim() : ''
+            };
+
+            saveAllState();
+            syncBeritaAcaraDocument();
+        }
+
+        function syncBeritaAcaraDocument() {
+            const counts = getComputedCounts();
+            const inpSeharusnya = document.getElementById('ba-total-seharusnya');
+            const inpHadir = document.getElementById('ba-total-hadir');
+            const inpTidakHadir = document.getElementById('ba-total-tidak-hadir');
+            const inpNoTidakHadir = document.getElementById('ba-no-tidak-hadir');
+
+            const valSeharusnya = (inpSeharusnya && inpSeharusnya.value !== '')
+                ? (parseInt(inpSeharusnya.value, 10) || 0)
+                : counts.totalTerdaftar;
+
+            const valHadir = (inpHadir && inpHadir.value !== '')
+                ? (parseInt(inpHadir.value, 10) || 0)
+                : counts.totalHadir;
+
+            const valTidakHadir = (inpTidakHadir && inpTidakHadir.value !== '')
+                ? (parseInt(inpTidakHadir.value, 10) || 0)
+                : Math.max(0, valSeharusnya - valHadir);
+
+            const valNoAbsen = (inpNoTidakHadir && inpNoTidakHadir.value.trim() !== '')
+                ? inpNoTidakHadir.value.trim()
+                : counts.noTidakHadirText;
+
+            const setDocTxt = (id, text) => {
+                const el = document.getElementById(id);
+                if (el) el.textContent = text;
+            };
+
+            setDocTxt('ba-doc-tanggal', formatTanggalIndonesia(sessionMeta.tanggal));
+            setDocTxt('ba-doc-mapel', sessionMeta.mapel || '-');
+            setDocTxt('ba-doc-waktu', sessionMeta.waktu || '-');
+            setDocTxt('ba-doc-ruang', sessionMeta.ruang || '-');
+            const baModaEl = document.getElementById('ba-doc-moda');
+            if (baModaEl) {
+                baModaEl.innerHTML = `${escapeHtml(beritaAcaraMeta.modaUjian)}<br><span style="font-size: 9.5pt;">(${escapeHtml(beritaAcaraMeta.aplikasiUjian || 'CBT Android')})</span>`;
+            }
+            setDocTxt('ba-doc-seharusnya', String(valSeharusnya));
+            setDocTxt('ba-doc-hadir', String(valHadir));
+            setDocTxt('ba-doc-tidak-hadir', String(valTidakHadir));
+            setDocTxt('ba-doc-no-absen', valNoAbsen);
+            setDocTxt('ba-doc-jaringan', beritaAcaraMeta.statusJaringan || '-');
+            setDocTxt('ba-doc-catatan', beritaAcaraMeta.catatan || '-');
+
+            setDocTxt('ba-doc-tgl-ttd', formatTanggalSingkat(sessionMeta.tanggal));
+            setDocTxt('ba-doc-nama-p1', sessionMeta.pengawas || '-');
+            setDocTxt('ba-doc-nip-p1', sessionMeta.nip ? `NIP. ${sessionMeta.nip}` : 'NIP. -');
+
+            const signGrid = document.getElementById('ba-doc-sign-grid');
+            const signCol1 = document.getElementById('ba-doc-sign-col-1');
+            const signCol2 = document.getElementById('ba-doc-sign-col-2');
+            const labelP1 = document.getElementById('ba-doc-label-p1');
+
+            if (beritaAcaraMeta.pengawas2) {
+                if (signGrid) {
+                    signGrid.classList.remove('grid-cols-1');
+                    signGrid.classList.add('grid-cols-2');
+                }
+                if (signCol1) {
+                    signCol1.classList.remove('ml-auto', 'w-64');
+                }
+                if (signCol2) signCol2.classList.remove('hidden');
+                if (labelP1) labelP1.textContent = 'Pengawas Ruang I,';
+                setDocTxt('ba-doc-nama-p2', beritaAcaraMeta.pengawas2);
+                setDocTxt('ba-doc-nip-p2', beritaAcaraMeta.nip2 ? `NIP. ${beritaAcaraMeta.nip2}` : 'NIP. -');
+            } else {
+                if (signGrid) {
+                    signGrid.classList.remove('grid-cols-2');
+                    signGrid.classList.add('grid-cols-1');
+                }
+                if (signCol1) {
+                    signCol1.classList.add('ml-auto', 'w-64');
+                }
+                if (signCol2) signCol2.classList.add('hidden');
+                if (labelP1) labelP1.textContent = 'Pengawas Ruang,';
+            }
+
+            // Salin elemen bersih tanpa atribut id duplikat ke dalam kotak pratinjau
+            const sourceSheet = document.getElementById('print-berita-acara-sheet');
+            const previewBox = document.getElementById('ba-live-preview-container');
+            if (sourceSheet && previewBox) {
+                const clone = sourceSheet.cloneNode(true);
+                clone.classList.remove('hidden', 'max-w-4xl', 'p-6');
+                clone.style.fontFamily = "'Times New Roman', Times, Georgia, serif";
+                clone.removeAttribute('id');
+                clone.querySelectorAll('[id]').forEach(node => node.removeAttribute('id'));
+                previewBox.innerHTML = '';
+                previewBox.appendChild(clone);
+            }
+        }
+
+        function generateBeritaAcaraPreview() {
+            saveBeritaAcaraMeta(true);
+            const badge = document.getElementById('ba-preview-status-badge');
+            if (badge) {
+                badge.textContent = `✓ Di-generate (${new Date().toLocaleTimeString('id-ID')})`;
+            }
+            showToast('Dokumen Berita Acara berhasil di-generate & diperbarui!', 'success');
+        }
+
+        function refreshBeritaAcaraData() {
+            loadAllState();
+            applySessionInputs();
+            updateStats();
+            renderAttendanceTable();
+            syncPrintHeaderMeta();
+            recalcBeritaAcaraCounts(true);
+            showToast('Data kehadiran & Berita Acara berhasil diperbarui.', 'info');
+        }
+
+        function refreshAllAppData() {
+            loadAllState();
+            applySessionInputs();
+            updateStats();
+            renderAttendanceTable();
+            syncPrintHeaderMeta();
+            recalcBeritaAcaraCounts(true);
+            showToast('Seluruh data absensi & Berita Acara telah disinkronkan.', 'success');
+        }
+
+        /* =========================================================
+           INPUT SISWA TIDAK HADIR (SAKIT / IZIN / ALPA)
+           ========================================================= */
+        function openAbsentStudentModal() {
+            const pickerWrap = document.getElementById('absent-master-picker-wrap');
+            const selectEl = document.getElementById('abs-select-master');
+            const roomMaster = getRoomFilteredMaster();
+
+            if (selectEl && pickerWrap) {
+                const belumHadir = roomMaster.filter(st =>
+                    !attendanceLogs.some(l =>
+                        (st.no && l.no && st.no.toUpperCase() === l.no.toUpperCase()) ||
+                        (st.nama && l.nama && st.nama.toUpperCase() === l.nama.toUpperCase())
+                    )
+                );
+
+                if (belumHadir.length > 0) {
+                    pickerWrap.classList.remove('hidden');
+                    selectEl.innerHTML = `<option value="">-- Pilih Cepat Siswa Belum Hadir (${belumHadir.length} siswa) --</option>` +
+                        belumHadir.map((st, idx) => `<option value="${idx}">${escapeHtml(st.no)} - ${escapeHtml(st.nama)} (${escapeHtml(st.kelas)})</option>`).join('');
+                    selectEl._candidates = belumHadir;
+                } else {
+                    pickerWrap.classList.add('hidden');
+                }
+            }
+
+            document.getElementById('abs-no-peserta').value = '';
+            document.getElementById('abs-nisn').value = '';
+            document.getElementById('abs-nama').value = '';
+            document.getElementById('abs-kelas').value = '';
+            document.getElementById('abs-ruang').value = sessionMeta.ruang || 'Ruang 01';
+            document.getElementById('abs-status').value = 'SAKIT';
+            document.getElementById('abs-catatan').value = '';
+
+            const modal = document.getElementById('absent-student-modal');
+            if (modal) {
+                modal.classList.remove('hidden');
+                modal.classList.add('flex');
+            }
+        }
+
+        function closeAbsentStudentModal() {
+            const modal = document.getElementById('absent-student-modal');
+            if (modal) {
+                modal.classList.add('hidden');
+                modal.classList.remove('flex');
+            }
+        }
+
+        function fillAbsentFormFromMaster() {
+            const selectEl = document.getElementById('abs-select-master');
+            if (!selectEl || selectEl.value === '') return;
+            const list = selectEl._candidates || [];
+            const st = list[Number(selectEl.value)];
+            if (!st) return;
+
+            document.getElementById('abs-no-peserta').value = st.no || '';
+            document.getElementById('abs-nisn').value = st.nisn || '';
+            document.getElementById('abs-nama').value = st.nama || '';
+            document.getElementById('abs-kelas').value = st.kelas || '';
+            document.getElementById('abs-ruang').value = st.ruang || sessionMeta.ruang || 'Ruang 01';
+        }
+
+        function submitAbsentStudent(event) {
+            event.preventDefault();
+            const no = document.getElementById('abs-no-peserta').value.trim().toUpperCase();
+            const nisn = document.getElementById('abs-nisn').value.trim() || '-';
+            const nama = document.getElementById('abs-nama').value.trim().toUpperCase();
+            const kelas = document.getElementById('abs-kelas').value.trim().toUpperCase();
+            const ruang = document.getElementById('abs-ruang').value.trim() || sessionMeta.ruang || 'Ruang 01';
+            const status = document.getElementById('abs-status').value;
+            const catatan = document.getElementById('abs-catatan').value.trim();
+
+            if (!no || !nama) {
+                showToast('Nomor Peserta dan Nama Siswa wajib diisi.', 'warning');
+                return;
+            }
+
+            const existingIdx = attendanceLogs.findIndex(item =>
+                (item.no && item.no.toUpperCase() === no) ||
+                (item.nama && item.nama.toUpperCase() === nama)
+            );
+
+            const entry = {
+                no,
+                nisn,
+                nama,
+                kelas,
+                ruang,
+                waktu: catatan ? `${status} (${catatan})` : status,
+                status,
+                catatan
+            };
+
+            if (existingIdx >= 0) {
+                attendanceLogs[existingIdx] = entry;
+            } else {
+                attendanceLogs.unshift(entry);
+            }
+
+            saveAllState();
+            updateStats();
+            renderAttendanceTable();
+            recalcBeritaAcaraCounts(true);
+            closeAbsentStudentModal();
+            showToast(`Data ketidakhadiran ${nama} (${status}) dicatat.`, 'info');
+        }
+
+        function handleQrPhotoCapture(event) {
+            const file = event.target.files?.[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const img = new Image();
+                img.onload = () => {
+                    const canvasEl = document.getElementById('qr-hidden-canvas');
+                    const ctx = canvasEl.getContext('2d');
+                    const maxDim = 1000;
+                    const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+                    canvasEl.width = Math.round(img.width * scale);
+                    canvasEl.height = Math.round(img.height * scale);
+                    ctx.drawImage(img, 0, 0, canvasEl.width, canvasEl.height);
+
+                    if (typeof jsQR !== 'undefined') {
+                        const imgData = ctx.getImageData(0, 0, canvasEl.width, canvasEl.height);
+                        const code = jsQR(imgData.data, imgData.width, imgData.height, { inversionAttempts: 'attemptBoth' });
+                        if (code && code.data) {
+                            handleDetectedQrText(code.data);
+                        } else {
+                            showToast('QR Code tidak terbaca pada foto. Pastikan QR terlihat jelas dan tidak buram.', 'warning');
+                        }
+                    }
+                };
+                img.src = e.target.result;
+            };
+            reader.readAsDataURL(file);
+            event.target.value = '';
+        }
+
+        function handleManualBarcodeSubmit(event) {
+            event.preventDefault();
+            const inp = document.getElementById('manual-qr-input');
+            const val = inp?.value.trim();
+            if (!val) return;
+            handleDetectedQrText(val);
+            inp.value = '';
+        }
+
+        function handleDetectedQrText(rawText) {
+            const clean = String(rawText || '').trim();
+            if (!clean) return;
+
+            const now = Date.now();
+            if (clean === lastScannedRaw && (now - lastScannedAt) < 2500) {
+                return;
+            }
+            lastScannedRaw = clean;
+            lastScannedAt = now;
+
+            let no = '';
+            let nisn = '-';
+            let nama = '';
+            let kelas = '-';
+            let ruang = sessionMeta.ruang || 'Ruang 01';
+
+            if (clean.includes('|')) {
+                const parts = clean.split('|').map(p => p.trim());
+                if (parts.length >= 5) {
+                    [no, nisn, nama, kelas, ruang] = parts;
+                } else if (parts.length === 3) {
+                    [no, nisn, kelas] = parts;
+                } else {
+                    no = parts[0];
+                    nama = parts[1] || '';
+                }
+            } else {
+                no = clean.toUpperCase();
+            }
+
+            const matchedMaster = masterStudents.find(m =>
+                (no && m.no && m.no.toUpperCase() === no.toUpperCase()) ||
+                (nisn && nisn !== '-' && m.nisn === nisn) ||
+                (no && m.nisn === no)
+            );
+
+            if (matchedMaster) {
+                no = matchedMaster.no || no;
+                nisn = matchedMaster.nisn || nisn;
+                nama = matchedMaster.nama || nama;
+                kelas = matchedMaster.kelas || kelas;
+                ruang = matchedMaster.ruang || ruang;
+            }
+
+            if (!nama) {
+                nama = `PESERTA (${no})`;
+            }
+
+            const nowStr = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) + ' WIB';
+            const existingIdx = attendanceLogs.findIndex(item =>
+                (no && item.no && item.no.toUpperCase() === no.toUpperCase()) ||
+                (nisn && nisn !== '-' && item.nisn === nisn)
+            );
+
+            const record = {
+                no: no.toUpperCase(),
+                nisn,
+                nama: nama.toUpperCase(),
+                kelas: kelas.toUpperCase(),
+                ruang,
+                waktu: nowStr,
+                status: 'HADIR'
+            };
+
+            if (existingIdx >= 0) {
+                const prevStatus = attendanceLogs[existingIdx].status;
+                attendanceLogs[existingIdx] = record;
+                showToast(
+                    prevStatus !== 'HADIR'
+                        ? `${record.nama} diperbarui menjadi HADIR (${nowStr}).`
+                        : `${record.nama} sudah tercatat hadir sebelumnya (${nowStr}).`,
+                    'info'
+                );
+            } else {
+                attendanceLogs.unshift(record);
+                showToast(`HADIR: ${record.nama} (${record.no})`, 'success');
+            }
+
+            const lastBody = document.getElementById('last-scan-body');
+            if (lastBody) {
+                lastBody.innerHTML = `
+                    <div class="flex items-center justify-between gap-2 bg-emerald-50 border border-emerald-200 rounded-xl p-2.5">
+                        <div>
+                            <div class="font-extrabold text-emerald-950">${escapeHtml(record.nama)}</div>
+                            <div class="text-[11px] text-emerald-800">${escapeHtml(record.no)} • NISN: ${escapeHtml(record.nisn)} • ${escapeHtml(record.kelas)} (${escapeHtml(record.ruang)})</div>
+                        </div>
+                        <span class="px-2.5 py-1 rounded-lg bg-emerald-600 text-white font-bold text-[11px] shrink-0">${escapeHtml(record.waktu)}</span>
+                    </div>
+                `;
+            }
+
+            playBeepSuccess();
+            saveAllState();
+            updateStats();
+            renderAttendanceTable();
+            recalcBeritaAcaraCounts(true);
+        }
+
+        function playBeepSuccess() {
+            try {
+                const AudioCtx = window.AudioContext || window.webkitAudioContext;
+                if (!AudioCtx) return;
+                const ctx = new AudioCtx();
+                const osc = ctx.createOscillator();
+                const gain = ctx.createGain();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(880, ctx.currentTime);
+                gain.gain.setValueAtTime(0.08, ctx.currentTime);
+                osc.connect(gain);
+                gain.connect(ctx.destination);
+                osc.start();
+                osc.stop(ctx.currentTime + 0.12);
+            } catch (e) {}
+        }
+
+        /* =========================================================
+           IMPOR MASTER SISWA (.XLSX) & RENDER TABEL KEHADIRAN
+           ========================================================= */
+        function handleMasterStudentsUpload(event) {
+            const file = event.target.files?.[0];
+            if (!file) return;
+
+            if (typeof XLSX === 'undefined') {
+                showToast('Library Excel belum termuat.', 'error');
+                return;
+            }
+
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const data = new Uint8Array(e.target.result);
+                    const wb = XLSX.read(data, { type: 'array' });
+                    const sheet = wb.Sheets[wb.SheetNames[0]];
+                    const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+
+                    const loaded = [];
+                    rows.forEach((row, idx) => {
+                        const norm = {};
+                        Object.keys(row).forEach(k => {
+                            norm[k.trim().toLowerCase().replace(/\s+/g, '_')] = String(row[k]).trim();
+                        });
+                        const nama = norm.nama_siswa || norm.nama || norm.nama_lengkap || '';
+                        if (!nama) return;
+
+                        loaded.push({
+                            no: (norm.no_peserta || norm.nomor_peserta || norm.no || `US-26-${String(idx + 1).padStart(3, '0')}`).toUpperCase(),
+                            nisn: norm.nisn || norm.nis || '-',
+                            nama: nama.toUpperCase(),
+                            kelas: (norm.kelas || norm.rombel || '-').toUpperCase(),
+                            ruang: norm.ruang || norm.ruang_ujian || sessionMeta.ruang || 'Ruang 01'
+                        });
+                    });
+
+                    if (loaded.length === 0) {
+                        showToast('Data siswa tidak ditemukan pada file Excel.', 'warning');
+                        return;
+                    }
+
+                    masterStudents = loaded;
+                    sessionMeta.jumlahSiswaRuangan = String(getRoomFilteredMaster().length || loaded.length);
+                    applySessionInputs();
+                    saveAllState();
+                    updateStats();
+                    renderAttendanceTable();
+                    recalcBeritaAcaraCounts(true);
+                    showToast(`Berhasil memuat ${loaded.length} data master peserta ujian.`, 'success');
+                } catch (err) {
+                    showToast('Gagal membaca file Excel master siswa.', 'error');
+                }
+            };
+            reader.readAsArrayBuffer(file);
+            event.target.value = '';
+        }
+
+        function renderAttendanceTable() {
+            const tbody = document.getElementById('attendance-table-body');
+            const printTbody = document.getElementById('print-attendance-tbody');
+            const searchQ = (document.getElementById('filter-att-search')?.value || '').trim().toLowerCase();
+            const statusFilter = document.getElementById('filter-att-status')?.value || 'ALL';
+
+            const filtered = attendanceLogs.filter(item => {
+                const st = item.status || 'HADIR';
+                const matchStatus = statusFilter === 'ALL' ||
+                    (statusFilter === 'HADIR' && st === 'HADIR') ||
+                    (statusFilter === 'ABSENT' && st !== 'HADIR');
+                const matchSearch = !searchQ ||
+                    (item.nama || '').toLowerCase().includes(searchQ) ||
+                    (item.no || '').toLowerCase().includes(searchQ) ||
+                    (item.nisn || '').toLowerCase().includes(searchQ);
+                return matchStatus && matchSearch;
+            });
+
+            if (tbody) {
+                if (filtered.length === 0) {
+                    tbody.innerHTML = `
+                        <tr>
+                            <td colspan="8" class="p-6 text-center text-slate-400">
+                                Belum ada catatan kehadiran atau ketidakhadiran peserta ujian.
+                            </td>
+                        </tr>`;
+                } else {
+                    tbody.innerHTML = filtered.map((row, idx) => {
+                        const realIndex = attendanceLogs.indexOf(row);
+                        const isHadir = (row.status || 'HADIR') === 'HADIR';
+                        const badgeClass = isHadir
+                            ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
+                            : 'bg-rose-100 text-rose-800 border-rose-200';
+                        return `
+                            <tr class="hover:bg-slate-50">
+                                <td class="p-2.5 text-center font-semibold text-slate-600">${idx + 1}</td>
+                                <td class="p-2.5 font-mono text-[11px] text-slate-700">${escapeHtml(row.waktu || '-')}</td>
+                                <td class="p-2.5 font-bold text-[#123466]">${escapeHtml(row.no || '-')}</td>
+                                <td class="p-2.5 font-bold text-slate-800">${escapeHtml(row.nama || '-')}</td>
+                                <td class="p-2.5 font-semibold text-slate-700">${escapeHtml(row.kelas || '-')}</td>
+                                <td class="p-2.5 text-slate-700">${escapeHtml(row.ruang || '-')}</td>
+                                <td class="p-2.5 text-center">
+                                    <span class="px-2 py-0.5 rounded-full text-[10px] font-extrabold border ${badgeClass}">
+                                        ${escapeHtml(row.status || 'HADIR')}
+                                    </span>
+                                </td>
+                                <td class="p-2.5 text-center">
+                                    <button type="button" onclick="deleteAttendanceEntry(${realIndex})" title="Hapus Baris" class="text-rose-600 hover:text-rose-800 font-bold text-xs px-2 py-1 rounded hover:bg-rose-50">
+                                        Hapus
+                                    </button>
+                                </td>
+                            </tr>`;
+                    }).join('');
+                }
+            }
+
+            if (printTbody) {
+                if (attendanceLogs.length === 0) {
+                    printTbody.innerHTML = `
+                        <tr>
+                            <td colspan="7" class="border border-slate-700 p-4 text-center text-slate-500" style="font-family: 'Times New Roman', Times, Georgia, serif;">
+                                Belum ada data peserta yang tercatat.
+                            </td>
+                        </tr>`;
+                } else {
+                    printTbody.innerHTML = attendanceLogs.map((row, idx) => `
+                        <tr style="font-family: 'Times New Roman', Times, Georgia, serif;">
+                            <td class="border border-slate-700 p-1.5 text-center">${idx + 1}</td>
+                            <td class="border border-slate-700 p-1.5 font-semibold">${escapeHtml(row.no || '-')}</td>
+                            <td class="border border-slate-700 p-1.5">${escapeHtml(row.nisn || '-')}</td>
+                            <td class="border border-slate-700 p-1.5 font-semibold">${escapeHtml(row.nama || '-')}</td>
+                            <td class="border border-slate-700 p-1.5 text-center">${escapeHtml(row.kelas || '-')}</td>
+                            <td class="border border-slate-700 p-1.5 text-center">${escapeHtml(row.waktu || '-')}</td>
+                            <td class="border border-slate-700 p-1.5 text-center font-bold">${escapeHtml(row.status || 'HADIR')}</td>
+                        </tr>
+                    `).join('');
+                }
+            }
+        }
+
+        function deleteAttendanceEntry(index) {
+            if (index < 0 || index >= attendanceLogs.length) return;
+            attendanceLogs.splice(index, 1);
+            saveAllState();
+            updateStats();
+            renderAttendanceTable();
+            recalcBeritaAcaraCounts(true);
+            showToast('Baris data kehadiran dihapus.', 'info');
+        }
+
+        function confirmResetAttendance() {
+            openConfirmDialog(
+                'Reset Data & Sesi Ujian',
+                'Tindakan ini akan mengosongkan seluruh Daftar Kehadiran, Database Master Peserta Terdaftar, dan mengembalikan hitungan Total Terdaftar, Hadir, serta Belum Scan ke 0 untuk persiapan ruangan berikutnya. Lanjutkan?',
+                () => {
+                    attendanceLogs = [];
+                    masterStudents = [];
+                    sessionMeta.jumlahSiswaRuangan = '';
+                    beritaAcaraMeta.totalSeharusnya = '';
+                    beritaAcaraMeta.totalHadir = '';
+                    beritaAcaraMeta.noTidakHadir = 'Nihil';
+                    applySessionInputs();
+                    saveAllState();
+                    updateStats();
+                    renderAttendanceTable();
+                    recalcBeritaAcaraCounts(true);
+                    const lastBody = document.getElementById('last-scan-body');
+                    if (lastBody) {
+                        lastBody.textContent = 'Belum ada kartu peserta ujian yang dipindai pada sesi ini.';
+                    }
+                    showToast('Seluruh data kehadiran & master peserta berhasil di-reset ke 0.', 'warning');
+                }
+            );
+        }
+
+        /* =========================================================
+           PRINT OUT & DOWNLOAD PDF PORTRAIT A4 / REKAP EXCEL
+           ========================================================= */
+        function printBeritaAcara(includeAttendance = true) {
+            saveBeritaAcaraMeta(false);
+            syncPrintHeaderMeta();
+            renderAttendanceTable();
+
+            document.body.classList.remove('print-only-ba', 'print-only-attendance', 'print-both');
+            document.body.classList.add(includeAttendance ? 'print-both' : 'print-only-ba');
+
+            setTimeout(() => {
+                window.print();
+            }, 120);
+        }
+
+        async function rasterizeSvgsInElement(containerEl) {
+            const svgs = Array.from(containerEl.querySelectorAll('svg'));
+            for (const svg of svgs) {
+                try {
+                    const rect = svg.getBoundingClientRect();
+                    const w = Math.max(74, Math.round(rect.width || 74));
+                    const h = Math.max(82, Math.round(rect.height || 82));
+                    const serializer = new XMLSerializer();
+                    let svgStr = serializer.serializeToString(svg);
+                    if (!svgStr.includes('xmlns="http://www.w3.org/2000/svg"')) {
+                        svgStr = svgStr.replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg"');
+                    }
+                    const svgBlob = new Blob([svgStr], { type: 'image/svg+xml;charset=utf-8' });
+                    const url = URL.createObjectURL(svgBlob);
+
+                    await new Promise((resolve) => {
+                        const img = new Image();
+                        img.onload = () => {
+                            const canvas = document.createElement('canvas');
+                            canvas.width = w * 3;
+                            canvas.height = h * 3;
+                            const ctx = canvas.getContext('2d');
+                            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                            URL.revokeObjectURL(url);
+
+                            const pngImg = document.createElement('img');
+                            pngImg.src = canvas.toDataURL('image/png');
+                            pngImg.style.width = `${w}px`;
+                            pngImg.style.height = `${h}px`;
+                            pngImg.style.objectFit = 'contain';
+                            svg.replaceWith(pngImg);
+                            resolve();
+                        };
+                        img.onerror = () => {
+                            URL.revokeObjectURL(url);
+                            resolve();
+                        };
+                        img.src = url;
+                    });
+                } catch (e) {}
+            }
+        }
+
+        async function downloadBeritaAcaraPDF(includeAttendance = false) {
+            saveBeritaAcaraMeta(false);
+            syncPrintHeaderMeta();
+            renderAttendanceTable();
+
+            const mountHost = document.createElement('div');
+            mountHost.style.position = 'fixed';
+            mountHost.style.inset = '0';
+            mountHost.style.width = '100vw';
+            mountHost.style.height = '100vh';
+            mountHost.style.overflow = 'auto';
+            mountHost.style.background = 'rgba(15, 23, 42, 0.75)';
+            mountHost.style.zIndex = '99999';
+            mountHost.style.display = 'flex';
+            mountHost.style.justifyContent = 'center';
+            mountHost.style.alignItems = 'flex-start';
+            mountHost.style.padding = '12px';
+
+            const wrapper = document.createElement('div');
+            wrapper.style.background = '#ffffff';
+            wrapper.style.color = '#000000';
+            wrapper.style.padding = '8mm';
+            wrapper.style.width = '194mm';
+            wrapper.style.boxSizing = 'border-box';
+            wrapper.style.fontFamily = "'Times New Roman', Times, Georgia, serif";
+
+            const baClone = document.getElementById('print-berita-acara-sheet').cloneNode(true);
+            baClone.classList.remove('hidden');
+            baClone.style.display = 'block';
+            baClone.style.fontFamily = "'Times New Roman', Times, Georgia, serif";
+            baClone.querySelectorAll('td, th, p, div, span').forEach(el => {
+                el.style.letterSpacing = 'normal';
+                if (!el.style.lineHeight) {
+                    el.style.lineHeight = '1.4';
+                }
+            });
+            baClone.removeAttribute('id');
+            baClone.querySelectorAll('[id]').forEach(el => el.removeAttribute('id'));
+            wrapper.appendChild(baClone);
+
+            if (includeAttendance) {
+                const pageBreak = document.createElement('div');
+                pageBreak.style.pageBreakBefore = 'always';
+                pageBreak.style.marginTop = '12mm';
+                wrapper.appendChild(pageBreak);
+
+                const attClone = document.getElementById('print-attendance-sheet').cloneNode(true);
+                attClone.classList.remove('hidden');
+                attClone.style.display = 'block';
+                attClone.style.fontFamily = "'Times New Roman', Times, Georgia, serif";
+                attClone.querySelectorAll('td, th, p, div, span').forEach(el => {
+                    el.style.letterSpacing = 'normal';
+                    if (!el.style.lineHeight) {
+                        el.style.lineHeight = '1.4';
+                    }
+                });
+                attClone.removeAttribute('id');
+                attClone.querySelectorAll('[id]').forEach(el => el.removeAttribute('id'));
+                wrapper.appendChild(attClone);
+            }
+
+            mountHost.appendChild(wrapper);
+            document.body.appendChild(mountHost);
+
+            await rasterizeSvgsInElement(wrapper);
+            await new Promise(resolve => requestAnimationFrame(() => setTimeout(resolve, 150)));
+
+            const cleanMapel = (sessionMeta.mapel || 'Ujian').replace(/[^a-zA-Z0-9_-]/g, '_');
+            const cleanRuang = (sessionMeta.ruang || 'Ruang').replace(/[^a-zA-Z0-9_-]/g, '_');
+            const fileName = includeAttendance
+                ? `Berita_Acara_dan_Daftar_Hadir_${cleanMapel}_${cleanRuang}.pdf`
+                : `Berita_Acara_${cleanMapel}_${cleanRuang}.pdf`;
+
+            if (typeof html2pdf !== 'undefined') {
+                showToast('Menyiapkan file PDF Portrait A4...', 'info');
+                const opt = {
+                    margin: [8, 8, 8, 8],
+                    filename: fileName,
+                    image: { type: 'jpeg', quality: 0.98 },
+                    html2canvas: { scale: 2, useCORS: true, logging: false, backgroundColor: '#ffffff', scrollX: 0, scrollY: 0 },
+                    jsPDF: { unit: 'mm', format: [210, 297], orientation: 'p' }
+                };
+                try {
+                    await html2pdf().set(opt).from(wrapper).save();
+                    showToast(`Berhasil mengunduh ${fileName}`, 'success');
+                } catch (err) {
+                    downloadHtmlAsDocFallback(wrapper.innerHTML, fileName.replace('.pdf', '.doc'));
+                } finally {
+                    mountHost.remove();
+                }
+            } else {
+                downloadHtmlAsDocFallback(wrapper.innerHTML, fileName.replace('.pdf', '.doc'));
+                mountHost.remove();
+            }
+        }
+
+        async function downloadDaftarHadirPDF() {
+            syncPrintHeaderMeta();
+            renderAttendanceTable();
+
+            const mountHost = document.createElement('div');
+            mountHost.style.position = 'fixed';
+            mountHost.style.inset = '0';
+            mountHost.style.width = '100vw';
+            mountHost.style.height = '100vh';
+            mountHost.style.overflow = 'auto';
+            mountHost.style.background = 'rgba(15, 23, 42, 0.75)';
+            mountHost.style.zIndex = '99999';
+            mountHost.style.display = 'flex';
+            mountHost.style.justifyContent = 'center';
+            mountHost.style.alignItems = 'flex-start';
+            mountHost.style.padding = '12px';
+
+            const wrapper = document.createElement('div');
+            wrapper.style.background = '#ffffff';
+            wrapper.style.color = '#000000';
+            wrapper.style.padding = '8mm';
+            wrapper.style.width = '194mm';
+            wrapper.style.boxSizing = 'border-box';
+            wrapper.style.fontFamily = "'Times New Roman', Times, Georgia, serif";
+
+            const attClone = document.getElementById('print-attendance-sheet').cloneNode(true);
+            attClone.classList.remove('hidden');
+            attClone.style.display = 'block';
+            attClone.style.fontFamily = "'Times New Roman', Times, Georgia, serif";
+            attClone.querySelectorAll('td, th, p, div, span').forEach(el => {
+                el.style.letterSpacing = 'normal';
+                if (!el.style.lineHeight) {
+                    el.style.lineHeight = '1.4';
+                }
+            });
+            attClone.removeAttribute('id');
+            attClone.querySelectorAll('[id]').forEach(el => el.removeAttribute('id'));
+            wrapper.appendChild(attClone);
+
+            mountHost.appendChild(wrapper);
+            document.body.appendChild(mountHost);
+
+            await rasterizeSvgsInElement(wrapper);
+            await new Promise(resolve => requestAnimationFrame(() => setTimeout(resolve, 150)));
+
+            const cleanMapel = (sessionMeta.mapel || 'Ujian').replace(/[^a-zA-Z0-9_-]/g, '_');
+            const cleanRuang = (sessionMeta.ruang || 'Ruang').replace(/[^a-zA-Z0-9_-]/g, '_');
+            const fileName = `Daftar_Hadir_${cleanMapel}_${cleanRuang}.pdf`;
+
+            if (typeof html2pdf !== 'undefined') {
+                showToast('Menyiapkan PDF Daftar Hadir Portrait A4...', 'info');
+                const opt = {
+                    margin: [8, 8, 8, 8],
+                    filename: fileName,
+                    image: { type: 'jpeg', quality: 0.98 },
+                    html2canvas: { scale: 2, useCORS: true, logging: false, backgroundColor: '#ffffff', scrollX: 0, scrollY: 0 },
+                    jsPDF: { unit: 'mm', format: [210, 297], orientation: 'p' }
+                };
+                try {
+                    await html2pdf().set(opt).from(wrapper).save();
+                    showToast(`Berhasil mengunduh ${fileName}`, 'success');
+                } catch (err) {
+                    downloadHtmlAsDocFallback(wrapper.innerHTML, fileName.replace('.pdf', '.doc'));
+                } finally {
+                    mountHost.remove();
+                }
+            } else {
+                downloadHtmlAsDocFallback(wrapper.innerHTML, fileName.replace('.pdf', '.doc'));
+                mountHost.remove();
+            }
+        }
+
+        function downloadHtmlAsDocFallback(innerHtml, docFilename) {
+            const fullDoc = `<!DOCTYPE html><html><head><meta charset="UTF-8"><style>@page{size:210mm 297mm portrait;margin:12mm;}body,table,th,td,div,p,span,strong{font-family:'Times New Roman',Times,Georgia,serif !important;font-size:11pt;}table{width:100%;border-collapse:collapse;}th,td{border:1px solid #000;padding:4px 6px;}</style></head><body>${innerHtml}</body></html>`;
+            const blob = new Blob([fullDoc], { type: 'application/msword;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = docFilename;
+            document.body.appendChild(a);
+            a.click();
+            setTimeout(() => {
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            }, 800);
+            showToast(`Dokumen ${docFilename} berhasil diunduh.`, 'success');
+        }
+
+        function exportAttendanceExcel() {
+            if (typeof XLSX === 'undefined') {
+                showToast('Library Excel belum termuat.', 'error');
+                return;
+            }
+            if (attendanceLogs.length === 0) {
+                showToast('Belum ada data kehadiran untuk diekspor ke Excel.', 'warning');
+                return;
+            }
+
+            const rows = attendanceLogs.map((r, i) => ({
+                No: i + 1,
+                Mata_Pelajaran: sessionMeta.mapel,
+                Tanggal: sessionMeta.tanggal,
+                Ruang_Ujian: r.ruang || sessionMeta.ruang,
+                Nomor_Peserta: r.no,
+                NISN: r.nisn,
+                Nama_Peserta: r.nama,
+                Kelas: r.kelas,
+                Waktu_Keterangan: r.waktu,
+                Status: r.status || 'HADIR',
+                Pengawas_Ruang: sessionMeta.pengawas,
+                NIP_Pengawas: sessionMeta.nip || '-'
+            }));
+
+            const ws = XLSX.utils.json_to_sheet(rows);
+            ws['!cols'] = [
+                { wch: 5 }, { wch: 20 }, { wch: 13 }, { wch: 12 }, { wch: 15 },
+                { wch: 15 }, { wch: 28 }, { wch: 10 }, { wch: 18 }, { wch: 12 },
+                { wch: 24 }, { wch: 22 }
+            ];
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, 'Rekap_Kehadiran');
+
+            const cleanMapel = (sessionMeta.mapel || 'Ujian').replace(/[^a-zA-Z0-9_-]/g, '_');
+            const cleanRuang = (sessionMeta.ruang || 'Ruang').replace(/[^a-zA-Z0-9_-]/g, '_');
+            XLSX.writeFile(wb, `Rekap_Absensi_${cleanMapel}_${cleanRuang}.xlsx`);
+            showToast('File rekap Excel (.xlsx) berhasil diunduh.', 'success');
+        }
+
+        /* =========================================================
+           TOAST & DIALOG KONFIRMASI KUSTOM
+           ========================================================= */
+        function showToast(message, type = 'info') {
+            const container = document.getElementById('toast-container');
+            if (!container) return;
+
+            const styles = {
+                success: 'bg-emerald-600 text-white border-emerald-700',
+                warning: 'bg-amber-500 text-slate-950 border-amber-600',
+                error: 'bg-rose-600 text-white border-rose-700',
+                info: 'bg-slate-800 text-white border-slate-900'
+            };
+
+            const toast = document.createElement('div');
+            toast.className = `px-4 py-3 rounded-xl shadow-lg border text-xs font-semibold transition-all duration-300 ${styles[type] || styles.info}`;
+            toast.textContent = message;
+            container.appendChild(toast);
+
+            setTimeout(() => {
+                toast.style.opacity = '0';
+                setTimeout(() => toast.remove(), 300);
+            }, 3400);
+        }
+
+        function openConfirmDialog(title, message, onConfirm) {
+            const modal = document.getElementById('confirm-modal');
+            const titleEl = document.getElementById('confirm-title');
+            const msgEl = document.getElementById('confirm-message');
+            const cancelBtn = document.getElementById('confirm-cancel-btn');
+            const okBtn = document.getElementById('confirm-ok-btn');
+
+            if (!modal) return;
+            titleEl.textContent = title;
+            msgEl.textContent = message;
+
+            const close = () => {
+                modal.classList.add('hidden');
+                modal.classList.remove('flex');
+            };
+
+            cancelBtn.onclick = close;
+            okBtn.onclick = () => {
+                close();
+                if (typeof onConfirm === 'function') onConfirm();
+            };
+
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        }
+
+        function escapeHtml(str) {
+            if (str === null || str === undefined) return '';
+            return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+    </script>
+</body>
+</html>
